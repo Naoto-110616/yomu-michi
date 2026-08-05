@@ -140,7 +140,7 @@ export function buildGraph(p: Payload): Graph {
   }
 }
 
-/* ── 表示のためのヘルパー ──────────────────────── */
+/* ── 表示のためのヘルパー ───────────────────────────── */
 
 export function nodeRadius(n: BookNode): number {
   if (n.shelf) return n.star ? 3.2 + n.star * 1.15 : 5
