@@ -56,7 +56,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   const near = neighborhood(s)
   const k = Math.max(T.k, 0.28)
 
-  // ── エッジ ───────────────────
+  // ── エッジ ─────────────────────────────
   for (const e of graph.edges) {
     if (!isEdgeVisible(e, s)) continue
     const A = graph.nodes[e.from]
@@ -95,7 +95,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     }
   }
 
-  // ── ノード ───────────────────
+  // ── ノード ─────────────────────────────
   for (const n of graph.nodes) {
     if (!s.categories.has(n.cat)) continue
     const lit = (!near || near.has(n.i)) && matchesQuery(n, s.query)
@@ -169,7 +169,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   ctx.globalAlpha = 1
 }
 
-/* ── 座標変換 / ヒットテスト ───────────────── */
+/* ── 座標変換 / ヒットテスト ───────────────────────── */
 
 export const toWorld = (T: Transform, sx: number, sy: number) => ({
   x: (sx - T.x) / T.k,
