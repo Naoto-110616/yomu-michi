@@ -27,7 +27,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install numpy
       - run: npm install
+      # data/graph.json は pipeline/sources から毎回生成する（乱数はシード固定なので毎回同じ地図になる）
+      - run: npm run data
       - run: npm run build
         env:
           NEXT_PUBLIC_BASE_PATH: /yomu-michi
