@@ -60,7 +60,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     })
   }, [snapshot])
 
-  /* ── リサイズ ──────────────────────── */
+  /* ── リサイズ ─────────────────────────── */
   useEffect(() => {
     const resize = () => {
       const el = wrapRef.current
@@ -98,7 +98,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
 
   useEffect(draw, [mode, edgeTypes, categories, query, selected, draw])
 
-  /* ── 選択時に周辺へ寄せる ───────────── */
+  /* ── 選択時に周辺へ寄せる ────────────────── */
   const anim = useRef<number | null>(null)
   const focusOn = useCallback(
     (ids: Set<number>) => {
@@ -226,7 +226,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     }
   }, [draw, select, snapshot])
 
-  /* ── 選択ノードの関係リスト ─────────── */
+  /* ── 選択ノードの関係リスト ───────────────── */
   const relations = useMemo(() => {
     if (selected === null) return null
     const incoming: { node: number; type: RelationType; why: string }[] = []
