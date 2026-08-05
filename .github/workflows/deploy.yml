@@ -1,4 +1,4 @@
-name: Deploy Atlas to GitHub Pages
+name: Build & Deploy Atlas
 
 on:
   push:
@@ -6,9 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
@@ -16,33 +14,10 @@ concurrency:
 
 jobs:
   build:
+    name: ビルド（データ生成 → 静的書き出し）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      # configure-pages の enablement:true が "Resource not accessible by integration" で
-      # 落ちるケースがあるため、先に REST を直接叩いて Pages サイトを作りに行く。
-      # 既に有効なら 409 が返るだけなので、失敗しても続行する。
-      - name: Enable GitHub Pages (best effort)
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          code=$(curl -sS -o /tmp/pages.json -w '%{http_code}' -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${{ github.repository }}/pages" \
-            -d '{"build_type":"workflow"}')
-          echo "POST /pages -> $code"
-          cat /tmp/pages.json
-          if [ "$code" = "409" ] || [ "$code" = "201" ]; then
-            echo "Pages is available."
-          else
-            echo "::warning::Pages could not be enabled automatically (HTTP $code). Settings > Pages > Source = GitHub Actions を一度だけ手動で設定してください。"
-          fi
-
-      - uses: actions/configure-pages@v5
 
       - uses: actions/setup-node@v4
         with:
@@ -50,24 +25,39 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
       - run: pip install numpy
       - run: npm install
-      # data/graph.json は pipeline/sources から毎回生成する
-      # （乱数はシード固定なので、何度ビルドしても同じ地図になる）
-      - run: npm run data
-      - run: npm run build
+
+      # data/graph.json は pipeline/sources から毎回生成する。
+      # 乱数はシード固定なので、何度ビルドしても同じ座標＝同じ地図になる。
+      - name: グラフを生成
+        run: npm run data
+
+      - name: 静的書き出し
+        run: npm run build
         env:
           NEXT_PUBLIC_BASE_PATH: /yomu-michi
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./out
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      # Jekyll に _next/ を無視されないようにする
+      - run: touch out/.nojekyll
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: atlas-static
+          path: ./out
+          retention-days: 7
+
+      # gh-pages ブランチに配信。Pages のソースがこのブランチになっていれば
+      # push しただけで公開される（GITHUB_TOKEN の contents:write だけで足りる）。
+      - name: gh-pages へ配信
+        if: github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./out
+          publish_branch: gh-pages
+          enable_jekyll: false
+          user_name: github-actions[bot]
+          user_email: github-actions[bot]@users.noreply.github.com
+          commit_message: 'Atlas を更新'
