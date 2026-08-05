@@ -1,0 +1,27 @@
+{
+  "name": "yomu-michi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "読む道 — 本と本のあいだ（前提・発展・別視点・反論）を地図にする",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "data": "python3 pipeline/build.py && python3 pipeline/pack.py"
+  },
+  "dependencies": {
+    "next": "^16.3.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.6.0"
+  }
+}

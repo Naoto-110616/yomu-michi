@@ -1,0 +1,9 @@
+node_modules/
+.next/
+out/
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts
+__pycache__/
+.env*.local
+package-lock.json
