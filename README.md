@@ -1,3 +1,8 @@
+> **公開まであと1操作**
+> `gh-pages` ブランチにビルド済みの静的サイトが既に入っています。
+> **Settings → Pages → Source を「Deploy from a branch」/ `gh-pages` / `/ (root)` にして Save** すると
+> 下記URLで公開されます。（GITHUB_TOKEN では Pages サイトの新規作成が 403 になるため、ここだけ手動です）
+
 # 読む道 / yomu-michi
 
 **本と本のあいだを地図にする。**
@@ -66,28 +71,30 @@ components/
 lib/
   graph.ts           ドメインモデル（RelationType が中心）
   render.ts          Canvas 描画・ヒットテスト・ラベル衝突回避
-data/graph.json      Web が読む圧縮済みグラフ（86KB）
+data/graph.json      Web が読む圧縮済みグラフ（派生物。gitignore 済み）
 pipeline/
   build.py           マージ・正規化・エッジ生成・力学レイアウト（座標をここで確定させる）
-  pack.py            文字列を辞書化して 389KB → 86KB に圧縮
+  pack.py            文字列を辞書化して 389KB → 131KB に圧縮
   shelf.py           所有者の本棚93冊（★評価つき）
-  sources/*.json     賞・ランキングの生データ
+  sources/*.json     賞・ランキングの生データ（これが真のソース）
 ```
 
 レイアウトは **Python 側で確定**させて座標ごと配信しています。
 ブラウザで毎回シミュレーションを回さないので 1000 ノードでもスマホで軽く、
 かつ**毎回同じ形**になる——「地図」として扱うならこちらが正しい。
+乱数はシード固定なので、CI で何度ビルドしても 1 バイトも変わりません。
 
 ## 開発
 
 ```bash
 npm install
-npm run dev          # http://localhost:3000
+pip install numpy    # レイアウト計算に使う
 
-# データを作り直す（numpy が要ります）
-pip install numpy
-npm run data         # pipeline/build.py → pipeline/pack.py → data/graph.json
+npm run data         # pipeline/sources → data/graph.json を生成（初回に必須）
+npm run dev          # http://localhost:3000
 ```
+
+`data/graph.json` は派生物なのでリポジトリに入っていません。`npm run data` で作ります。
 
 本を追加したいときは `pipeline/sources/` に
 `[{"t":"タイトル","a":"著者","y":2020,"src":"出典ラベル","cat":"sf"}, ...]`
@@ -98,8 +105,17 @@ npm run data         # pipeline/build.py → pipeline/pack.py → data/graph.jso
 
 ## デプロイ
 
-`main` に push すると GitHub Actions が静的書き出し → GitHub Pages に配信します。
-Vercel など独自ドメインに移す場合は `NEXT_PUBLIC_BASE_PATH` を空にするだけです。
+`main` に push すると GitHub Actions が
+
+1. `pip install numpy` → `npm run data`（グラフ生成）
+2. `npm run build`（`output: 'export'` で静的書き出し）
+3. `gh-pages` ブランチへ配信
+
+まで自動で行います。初回だけ Settings → Pages で Source を `gh-pages` に指定してください。
+
+Vercel など別のホストに移す場合は、リポジトリを Import して
+`NEXT_PUBLIC_BASE_PATH` を設定しない（＝ルート配信）だけで動きます。
+Build Command に `pip install numpy && npm run data && npm run build` を指定してください。
 
 ## 次のフェーズ
 
