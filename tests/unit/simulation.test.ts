@@ -99,6 +99,24 @@ describe('Simulation: 表示の入れ替え', () => {
   })
 })
 
+describe('Simulation: AIの未検証エッジは物理に載らない', () => {
+  it('status 付きエッジはバネから除外される（視覚のみ）', () => {
+    const g = buildGraph(tinyPayload(), null, {
+      books: [], concepts: [], links: [], bonds: [],
+      proposals: [
+        { id: 'p1', kind: 'counter' as const, from: 'book_b', to: 'book_d', why: 'x', confidence: 0.8, status: 'proposed' },
+      ],
+    })
+    const realEdges = g.edges.filter((e) => !e.status).length
+    expect(g.edges.length).toBe(realEdges + 1) // 提案エッジは足されている
+    const sim = new Simulation(g)
+    sim.setVisible(g, new Set(g.nodes.map((n) => n.i)), g.edges.map((_, i) => i))
+    const linkForce = (sim as unknown as { linkForce: { links(): unknown[] } }).linkForce
+    expect(linkForce.links()).toHaveLength(realEdges) // バネは実エッジだけ
+    expect(runUntilStill(sim)).not.toBe(-1) // 沈静化も壊れない
+  })
+})
+
 describe('Simulation: 強調のフェード（物理と独立）', () => {
   it('物理が止まっていてもフェードは目標へ収束し、収束後に止まる', () => {
     const { sim } = setup()
