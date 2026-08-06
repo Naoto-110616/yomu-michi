@@ -10,7 +10,7 @@ export interface SessionUser {
 }
 
 export default function AccountMenu({
-  user, shelfCount, profiles, follows, viewingId, onToggleFollow, onView, onImportSample,
+  user, shelfCount, profiles, follows, viewingId, onToggleFollow, onView, onImportSample, onImportCsv,
 }: {
   user: SessionUser | null
   shelfCount: number | null
@@ -20,6 +20,7 @@ export default function AccountMenu({
   onToggleFollow: (profileId: string, on: boolean) => void
   onView: (p: Profile) => void
   onImportSample: () => Promise<number>
+  onImportCsv: (file: File) => Promise<number>
 }) {
   const [open, setOpen] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -87,6 +88,22 @@ export default function AccountMenu({
                   ? `ブクログの${imported}冊を取り込みました`
                   : 'ブクログの本棚（93冊）をワンタップで再現'}
               </button>
+              <label className="mb-2.5 block w-full cursor-pointer rounded-lg border border-line bg-panel2 py-2 text-center text-[12px] text-muted active:text-text">
+                ブクログCSVを取り込む（エクスポートしたファイル）
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    setImporting(true)
+                    setImported(await onImportCsv(file))
+                    setImporting(false)
+                    e.target.value = ''
+                  }}
+                />
+              </label>
               {profiles.filter((p) => p.id !== user.id).length > 0 && (
                 <>
                   <p className="m-0 mb-1 text-[10px] tracking-[0.08em] text-dim">アカウント同士の紐付き</p>
