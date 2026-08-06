@@ -8,7 +8,7 @@ import {
 import { Simulation } from '@/lib/simulation'
 import { fitTransform, hitTest, render, toWorld, type RenderState, type Transform } from '@/lib/render'
 import { getSupabase } from '@/lib/supabase'
-import { EMPTY_OVERLAY, bondPair, fetchOverlay, fetchPersonalView, fetchSocial, ndlKey, normalizeTitleKey, type NdlItem, type Overlay, type Profile, type Proposal } from '@/lib/overlay'
+import { EMPTY_OVERLAY, bondPair, computeOverlaps, fetchAllShelves, fetchOverlay, fetchPersonalView, fetchSocial, ndlKey, normalizeTitleKey, type NdlItem, type Overlay, type Profile, type Proposal } from '@/lib/overlay'
 import AccountMenu, { type SessionUser } from './AccountMenu'
 import Controls from './Controls'
 import DetailPanel from './DetailPanel'
@@ -91,6 +91,17 @@ export default function Atlas({ payload }: { payload: Payload }) {
     // overlay 更新（フォロー操作後）にも追従する
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, overlay])
+
+  /* ── 本棚の重なり → フォロー候補（「あなたと7冊重なっている人」） ── */
+  const [overlaps, setOverlaps] = useState<Map<string, string[]>>(new Map())
+  useEffect(() => {
+    if (!user || !userShelf || userShelf.size === 0) { setOverlaps(new Map()); return }
+    let on = true
+    fetchAllShelves()
+      .then((rows) => { if (on) setOverlaps(computeOverlaps(user.id, new Set(userShelf.keys()), rows)) })
+      .catch(() => {})
+    return () => { on = false }
+  }, [user, userShelf])
 
   // 本のタイトル解決（焼き込み + 実体化した本）
   const titleIndex = useMemo(() => {
@@ -759,6 +770,8 @@ export default function Atlas({ payload }: { payload: Payload }) {
             profiles={overlay.profiles}
             follows={overlay.follows}
             viewingId={viewing?.id ?? null}
+            overlaps={overlaps}
+            titleOf={(k) => keyTitle.get(k) ?? k.replace(/^isbn:/, '')}
             onToggleFollow={toggleFollow}
             onView={(p) => setViewing(p)}
             onImportSample={importSampleShelf}
