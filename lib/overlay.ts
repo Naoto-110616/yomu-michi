@@ -1,10 +1,10 @@
 /**
  * DB 側から来る「動的な層」。
+ * 焼き込みグラフの上に、実体化した本・概念・結びつき（強度つき投票）・
+ * アカウント（プロフィール / フォロー）を重ねる。
  *
- * 焼き込みグラフ（1033ノード）の上に、次の3つを重ねる:
- *   - ユーザーが登録した本（NDL検索から実体化した本）
- *   - ユーザーが作った概念
- *   - 概念⇄本の紐付け（＝投票）。supporters が多いほど太く・大きく描く
+ * 結びつきの強さは 1-5 の5段階。表示は全ユーザーの平均。
+ * 例: 夜と霧 × 哲学 = A:5, B:4 → 平均 4.5 → 太い線
  */
 import { getSupabase } from './supabase'
 
@@ -26,56 +26,105 @@ export interface OverlayLink {
   concept: string
   book: string
   supporters: number
+  strength: number
+}
+export interface OverlayBond {
+  a: string
+  b: string
+  supporters: number
+  strength: number
+}
+export interface Profile {
+  id: string
+  username: string
 }
 
 export interface Overlay {
   books: OverlayBook[]
   concepts: OverlayConcept[]
   links: OverlayLink[]
-  /** 自分が紐付けたもの（concept_key::book_key） */
-  mine: Set<string>
+  bonds: OverlayBond[]
+  /** 自分の紐付け強度: "concept::book" / "a::b" → 1-5 */
+  mine: Map<string, number>
+  profiles: Profile[]
+  /** 自分がフォローしている user id */
+  follows: Set<string>
 }
 
-export const EMPTY_OVERLAY: Overlay = { books: [], concepts: [], links: [], mine: new Set() }
+export const EMPTY_OVERLAY: Overlay = {
+  books: [], concepts: [], links: [], bonds: [],
+  mine: new Map(), profiles: [], follows: new Set(),
+}
 
 export async function fetchOverlay(userId: string | null): Promise<Overlay> {
   const sb = getSupabase()
   if (!sb) return EMPTY_OVERLAY
-  const [strength, concepts, books, mineRes] = await Promise.all([
-    sb.from('concept_link_strength').select('concept_key, book_key, supporters'),
+  const [strength, bonds, concepts, books, profiles, mineLinks, mineBonds, follows] = await Promise.all([
+    sb.from('concept_link_strength').select('concept_key, book_key, supporters, strength'),
+    sb.from('book_link_strength').select('a_key, b_key, supporters, strength'),
     sb.from('concepts').select('key, label, description, official'),
     sb.from('books').select('key, title, author, year, cat, isbn'),
-    userId
-      ? sb.from('concept_links').select('concept_key, book_key').eq('user_id', userId)
-      : Promise.resolve({ data: [] as { concept_key: string; book_key: string }[] }),
+    sb.from('profiles').select('id, username'),
+    userId ? sb.from('concept_links').select('concept_key, book_key, strength').eq('user_id', userId) : Promise.resolve({ data: [] }),
+    userId ? sb.from('book_links').select('a_key, b_key, strength').eq('user_id', userId) : Promise.resolve({ data: [] }),
+    userId ? sb.from('follows').select('followee').eq('follower', userId) : Promise.resolve({ data: [] }),
   ])
+  type Row = Record<string, unknown>
+  const mine = new Map<string, number>()
+  for (const r of ((mineLinks as { data: Row[] | null }).data ?? []))
+    mine.set(`${r.concept_key}::${r.book_key}`, Number(r.strength ?? 3))
+  for (const r of ((mineBonds as { data: Row[] | null }).data ?? []))
+    mine.set(`${r.a_key}::${r.b_key}`, Number(r.strength ?? 3))
   return {
     links: (strength.data ?? []).map((r) => ({
-      concept: r.concept_key as string,
-      book: r.book_key as string,
-      supporters: r.supporters as number,
+      concept: r.concept_key as string, book: r.book_key as string,
+      supporters: r.supporters as number, strength: Number(r.strength ?? 3),
+    })),
+    bonds: (bonds.data ?? []).map((r) => ({
+      a: r.a_key as string, b: r.b_key as string,
+      supporters: r.supporters as number, strength: Number(r.strength ?? 3),
     })),
     concepts: (concepts.data ?? []).map((r) => ({
-      key: r.key as string,
-      label: r.label as string,
-      description: (r.description as string) ?? '',
-      official: !!r.official,
+      key: r.key as string, label: r.label as string,
+      description: (r.description as string) ?? '', official: !!r.official,
     })),
     books: (books.data ?? []).map((r) => ({
-      key: r.key as string,
-      title: r.title as string,
-      author: (r.author as string) ?? '',
-      year: (r.year as number) ?? 0,
-      cat: (r.cat as string) ?? 'lit',
+      key: r.key as string, title: r.title as string, author: (r.author as string) ?? '',
+      year: (r.year as number) ?? 0, cat: (r.cat as string) ?? 'lit',
       isbn: (r.isbn as string) ?? undefined,
     })),
-    mine: new Set(
-      ((mineRes as { data: { concept_key: string; book_key: string }[] | null }).data ?? []).map(
-        (r) => `${r.concept_key}::${r.book_key}`
-      )
-    ),
+    profiles: (profiles.data ?? []).map((r) => ({ id: r.id as string, username: r.username as string })),
+    mine,
+    follows: new Set((((follows as { data: Row[] | null }).data) ?? []).map((r) => r.followee as string)),
   }
 }
+
+/** 他のアカウントの視点: その人の本棚と、その人自身の強度を取る */
+export async function fetchPersonalView(userId: string) {
+  const sb = getSupabase()
+  if (!sb) return null
+  const [shelf, links, bonds] = await Promise.all([
+    sb.from('shelf').select('book_key, star').eq('user_id', userId),
+    sb.from('concept_links').select('concept_key, book_key, strength').eq('user_id', userId),
+    sb.from('book_links').select('a_key, b_key, strength').eq('user_id', userId),
+  ])
+  return {
+    shelf: new Map((shelf.data ?? []).map((r) => [r.book_key as string, r.star as number])),
+    links: (links.data ?? []).map((r) => ({
+      concept: r.concept_key as string, book: r.book_key as string,
+      supporters: 1, strength: Number(r.strength ?? 3),
+    })),
+    bonds: (bonds.data ?? []).map((r) => ({
+      a: r.a_key as string, b: r.b_key as string,
+      supporters: 1, strength: Number(r.strength ?? 3),
+    })),
+  }
+}
+
+/* ── 表紙（無料・キー不要: 国立国会図書館のサムネイル） ── */
+
+export const coverUrl = (isbn?: string) =>
+  isbn ? `https://ndlsearch.ndl.go.jp/thumbnail/${isbn.replace(/-/g, '')}.jpg` : null
 
 /* ── 「すぐ読み始める」ための外部リンク（すべて無料・キー不要） ── */
 
@@ -83,8 +132,7 @@ export function readLinks(title: string, author: string, isbn?: string) {
   const q = encodeURIComponent(`${title} ${author !== '—' ? author : ''}`.trim())
   return [
     {
-      label: '図書館で探す',
-      hint: 'カーリル — 近くの図書館の在架',
+      label: '図書館で探す', hint: 'カーリル — 近くの図書館の在架',
       url: isbn ? `https://calil.jp/book/${isbn}` : `https://calil.jp/search?q=${q}`,
     },
     { label: 'Amazon', hint: '新品・Kindle', url: `https://www.amazon.co.jp/s?k=${q}&i=stripbooks` },
@@ -112,3 +160,6 @@ export async function searchNdl(q: string): Promise<NdlItem[]> {
 
 /** NDL の本 → 実体化キー。ISBN があれば ISBN、無ければタイトルで */
 export const ndlKey = (item: NdlItem) => (item.isbn ? `isbn:${item.isbn}` : item.title.replace(/\s+/g, '').toLowerCase())
+
+/** 本と本の結びつきの正規化（無向: 辞書順で a < b） */
+export const bondPair = (x: string, y: string): [string, string] => (x < y ? [x, y] : [y, x])

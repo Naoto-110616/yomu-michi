@@ -2,13 +2,24 @@
 
 import { useState } from 'react'
 import { DEMO_ACCOUNTS, getSupabase } from '@/lib/supabase'
+import type { Profile } from '@/lib/overlay'
 
 export interface SessionUser {
   id: string
   email: string
 }
 
-export default function AccountMenu({ user, shelfCount }: { user: SessionUser | null; shelfCount: number | null }) {
+export default function AccountMenu({
+  user, shelfCount, profiles, follows, viewingId, onToggleFollow, onView,
+}: {
+  user: SessionUser | null
+  shelfCount: number | null
+  profiles: Profile[]
+  follows: Set<string>
+  viewingId: string | null
+  onToggleFollow: (profileId: string, on: boolean) => void
+  onView: (p: Profile) => void
+}) {
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -60,6 +71,38 @@ export default function AccountMenu({ user, shelfCount }: { user: SessionUser | 
               <p className="m-0 mb-3 text-[11px] text-muted">
                 本棚 {shelfCount ?? '…'} 冊 — 地図はこのアカウントの本棚で描かれています
               </p>
+              {profiles.filter((p) => p.id !== user.id).length > 0 && (
+                <>
+                  <p className="m-0 mb-1 text-[10px] tracking-[0.08em] text-dim">アカウント同士の紐付き</p>
+                  <ul className="m-0 mb-2.5 max-h-[180px] list-none overflow-y-auto p-0">
+                    {profiles.filter((p) => p.id !== user.id).map((p) => {
+                      const following = follows.has(p.id)
+                      return (
+                        <li key={p.id} className="flex items-center gap-1.5 border-b border-[#20252e] py-1.5 last:border-b-0">
+                          <span className="min-w-0 flex-1 truncate text-[12px]">{p.username}</span>
+                          <button
+                            onClick={() => onToggleFollow(p.id, !following)}
+                            className={`flex-none rounded-full border px-2 py-0.5 text-[10.5px] ${
+                              following
+                                ? 'border-[#7c6bd6] bg-[#a78bfa]/20 text-[#e9d5ff]'
+                                : 'border-line text-muted'
+                            }`}
+                          >
+                            {following ? 'フォロー中' : 'フォロー'}
+                          </button>
+                          <button
+                            onClick={() => { onView(p); setOpen(false) }}
+                            disabled={viewingId === p.id}
+                            className="flex-none rounded-full border border-[#2f4a58] bg-acc/10 px-2 py-0.5 text-[10.5px] text-acc disabled:opacity-50"
+                          >
+                            地図を見る
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </>
+              )}
               <button
                 onClick={async () => { await sb.auth.signOut(); setOpen(false) }}
                 className="w-full rounded-lg border border-line bg-panel2 py-2 text-[12px] text-muted active:text-text"
