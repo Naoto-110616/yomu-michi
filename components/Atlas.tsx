@@ -12,6 +12,7 @@ import { EMPTY_OVERLAY, bondPair, computeOverlaps, fetchAllShelves, fetchBooklog
 import AccountMenu, { type SessionUser } from './AccountMenu'
 import Controls from './Controls'
 import DetailPanel from './DetailPanel'
+import Landing from './Landing'
 import Legend from './Legend'
 import ProposalDock from './ProposalDock'
 
@@ -24,19 +25,38 @@ export default function Atlas({ payload }: { payload: Payload }) {
      ログイン中: そのアカウントの shelf テーブルの中身で描く。 */
   const [user, setUser] = useState<SessionUser | null>(null)
   const [userShelf, setUserShelf] = useState<Map<string, number> | null>(null)
+  const [authReady, setAuthReady] = useState(false)
 
   useEffect(() => {
     const sb = getSupabase()
-    if (!sb) return
+    if (!sb) { setAuthReady(true); return }
     sb.auth.getSession().then(({ data }) => {
       const u = data.session?.user
       setUser(u ? { id: u.id, email: u.email ?? '' } : null)
+      setAuthReady(true)
     })
     const { data: sub } = sb.auth.onAuthStateChange((_event, session) => {
       const u = session?.user
       setUser(u ? { id: u.id, email: u.email ?? '' } : null)
     })
     return () => sub.subscription.unsubscribe()
+  }, [])
+
+  /* ── 未ログインの入口（LP）──
+     ゲストの訪問はまずサービス概要から。後ろでは実物のグラフが動いている。
+     「さわってみる」でそのタブの間は再表示しない（sessionStorage）。 */
+  const [showLp, setShowLp] = useState(false)
+  useEffect(() => {
+    if (!authReady || user) { setShowLp(false); return }
+    try {
+      setShowLp(!sessionStorage.getItem('yomu:lp-seen'))
+    } catch {
+      setShowLp(true)
+    }
+  }, [authReady, user])
+  const dismissLp = useCallback(() => {
+    setShowLp(false)
+    try { sessionStorage.setItem('yomu:lp-seen', '1') } catch { /* no-op */ }
   }, [])
 
   useEffect(() => {
@@ -767,7 +787,8 @@ export default function Atlas({ payload }: { payload: Payload }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
+      {showLp && <Landing onEnter={dismissLp} />}
       <header className="z-20 flex flex-none items-center gap-2.5 border-b border-line bg-panel px-3.5 py-2.5">
         <h1 className="flex-none text-[15px] font-extrabold tracking-tight">
           読む道 <span className="text-acc">/ Atlas</span>
