@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { UserIdentity } from '@supabase/supabase-js'
 import { DEMO_ACCOUNTS, getSupabase } from '@/lib/supabase'
 import type { Profile } from '@/lib/overlay'
 
@@ -88,6 +89,51 @@ export default function AccountMenu({
     setBusy(false)
     if (error) setMsg(`送信できません: ${error.message}`)
     else setMsg('ログインリンクを送りました。メールを開いてください。')
+  }
+
+  /* ── ログイン方法の連携（後からソーシャルを紐づける） ──
+     1つのアカウントに Google / GitHub / メール を複数結びつけて、
+     どれでログインしても同じ地図に入れるようにする。 */
+  const [identities, setIdentities] = useState<UserIdentity[] | null>(null)
+  useEffect(() => {
+    if (!sb || !user || !open) return
+    let on = true
+    sb.auth.getUserIdentities().then(({ data }) => {
+      if (on) setIdentities(data?.identities ?? [])
+    })
+    return () => { on = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, open])
+
+  const linkProvider = async (provider: 'google' | 'github') => {
+    if (!sb) return
+    setBusy(true)
+    setMsg('')
+    const { error } = await sb.auth.linkIdentity({
+      provider,
+      options: { redirectTo: window.location.origin },
+    })
+    setBusy(false)
+    if (error) {
+      setMsg(/manual linking|not enabled|disabled/i.test(error.message)
+        ? '連携には Supabase の Authentication 設定で「Manual Linking」を有効にしてください'
+        : `連携できません: ${error.message}`)
+    }
+  }
+
+  const unlinkProvider = async (provider: string) => {
+    if (!sb || !identities) return
+    const found = identities.find((i) => i.provider === provider)
+    if (!found) return
+    setBusy(true)
+    setMsg('')
+    const { error } = await sb.auth.unlinkIdentity(found)
+    setBusy(false)
+    if (error) setMsg(`解除できません: ${error.message}`)
+    else {
+      const { data } = await sb.auth.getUserIdentities()
+      setIdentities(data?.identities ?? [])
+    }
   }
 
   const doImportBooklog = async () => {
@@ -231,6 +277,40 @@ export default function AccountMenu({
                   </ul>
                 </>
               )}
+              {/* ログイン方法の連携 */}
+              <p className="m-0 mb-1 text-[10px] tracking-[0.08em] text-dim">ログイン方法の連携</p>
+              <ul className="m-0 mb-2.5 list-none p-0">
+                {([['google', 'Google'], ['github', 'GitHub']] as const).map(([prov, label]) => {
+                  const linked = identities?.some((i) => i.provider === prov) ?? false
+                  const canUnlink = (identities?.length ?? 0) >= 2
+                  return (
+                    <li key={prov} className="flex items-center gap-1.5 border-b border-[#20252e] py-1.5 last:border-b-0">
+                      <span className="min-w-0 flex-1 text-[12px]">
+                        {label}
+                        {linked && <span className="ml-1.5 text-[10px] text-[#86efac]">連携済み</span>}
+                      </span>
+                      {linked ? (
+                        <button
+                          disabled={busy || !canUnlink}
+                          onClick={() => unlinkProvider(prov)}
+                          title={canUnlink ? '' : '最後のログイン方法は解除できません'}
+                          className="flex-none rounded-full border border-line px-2 py-0.5 text-[10.5px] text-muted disabled:opacity-40"
+                        >
+                          解除
+                        </button>
+                      ) : (
+                        <button
+                          disabled={busy}
+                          onClick={() => linkProvider(prov)}
+                          className="flex-none rounded-full border border-[#2f4a58] bg-acc/10 px-2 py-0.5 text-[10.5px] text-acc disabled:opacity-50"
+                        >
+                          連携する
+                        </button>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
               <button
                 onClick={async () => { await sb.auth.signOut(); setOpen(false) }}
                 className="w-full rounded-lg border border-line bg-panel2 py-2 text-[12px] text-muted active:text-text"
