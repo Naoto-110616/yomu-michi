@@ -15,10 +15,21 @@ export interface ConceptChip {
   mine: number | null
 }
 
+export type BondRel = 'pre' | 'next' | 'alt' | 'counter'
+
+export const BOND_RELS: { id: BondRel; label: string; hint: string }[] = [
+  { id: 'pre', label: '前提', hint: '相手を先に読むと、この本が効く' },
+  { id: 'next', label: '続き・発展', hint: 'この本の次に読む' },
+  { id: 'alt', label: '似ている', hint: '同じ読み味・同じテーマ' },
+  { id: 'counter', label: '反論', hint: '主張が対立している' },
+]
+
 export interface BondChip {
   otherKey: string
   otherIndex: number
   label: string
+  rel: BondRel
+  isFrom: boolean
   supporters: number
   strength: number
   mine: number | null
@@ -74,7 +85,7 @@ export default function DetailPanel({
   /** 紐付け候補（公式 + ユーザー概念） */
   allConcepts: { key: string; label: string }[]
   onSetTie: (conceptKey: string, bookKey: string, strength: number | null) => void
-  onSetBond: (bookKey: string, otherKey: string, strength: number | null) => void
+  onSetBond: (bookKey: string, otherKey: string, rel: BondRel, strength: number | null) => void
   onCreateConcept: (label: string, bookKey: string) => void
   onViewAccount?: (id: string, username: string) => void
 }) {
@@ -391,19 +402,25 @@ function BondChips({
   nodes: BookNode[]
   bonds: BondChip[]
   canRate: boolean
-  onSetBond: (bookKey: string, otherKey: string, strength: number | null) => void
+  onSetBond: (bookKey: string, otherKey: string, rel: BondRel, strength: number | null) => void
   onSelect: (i: number) => void
 }) {
   const [adding, setAdding] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
   const [q, setQ] = useState('')
-  const attached = new Set(bonds.map((b) => b.otherKey))
+  const [rel, setRel] = useState<BondRel>('alt')
   const candidates = q.trim().length >= 2
     ? nodes
-        .filter((n) => n.kind === 'book' && n.key !== node.key && !attached.has(n.key))
+        .filter((n) => n.kind === 'book' && n.key !== node.key && !n.key.includes('::'))
         .filter((n) => n.title.toLowerCase().includes(q.toLowerCase()))
         .slice(0, 6)
     : []
+  const relLabel = (r: BondRel, isFrom: boolean) => {
+    if (r === 'pre') return isFrom ? '前提→' : '←前提'
+    if (r === 'next') return isFrom ? '続き→' : '←続き'
+    if (r === 'counter') return isFrom ? '反論→' : '←反論'
+    return '似'
+  }
   return (
     <div className="mb-2">
       <p className="mb-1 mt-2 text-[10px] tracking-[0.05em] text-dim">▸ 結びつく本</p>
@@ -418,12 +435,13 @@ function BondChips({
                   : 'border-[#155e70] bg-[#22d3ee]/10 text-[#67e8f9]'
               }`}
             >
-              {b.label.length > 12 ? b.label.slice(0, 11) + '…' : b.label}
+              <span className="text-[9.5px] opacity-80">{relLabel(b.rel, b.isFrom)}</span>
+              {b.label.length > 11 ? b.label.slice(0, 10) + '…' : b.label}
               <span className="text-[10px] tabular-nums opacity-90">{b.strength.toFixed(1)}</span>
             </button>
             {open === b.otherKey && (
               <span className="mt-1 flex items-center gap-1.5 rounded-lg border border-line bg-panel2 px-1.5 py-1">
-                <StarStrength value={b.mine} onPick={(st) => { onSetBond(node.key, b.otherKey, st); setOpen(null) }} />
+                <StarStrength value={b.mine} onPick={(st) => { onSetBond(node.key, b.otherKey, b.rel, st); setOpen(null) }} />
                 <button onClick={() => onSelect(b.otherIndex)} className="text-[10px] text-dim">見る</button>
               </span>
             )}
@@ -440,6 +458,22 @@ function BondChips({
       </div>
       {adding && (
         <div className="mt-1.5 rounded-[10px] border border-line bg-panel2 p-2">
+          <div className="mb-1.5 flex flex-wrap gap-1">
+            {BOND_RELS.map((r) => (
+              <button
+                key={r.id}
+                onClick={() => setRel(r.id)}
+                title={r.hint}
+                className={`rounded-full border px-2 py-[3px] text-[10.5px] ${
+                  rel === r.id
+                    ? 'border-[#0e7490] bg-[#22d3ee]/20 text-[#a5f3fc]'
+                    : 'border-line text-dim'
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
           <input
             autoFocus
             value={q}
@@ -451,7 +485,7 @@ function BondChips({
             {candidates.map((n) => (
               <button
                 key={n.key}
-                onClick={() => { onSetBond(node.key, n.key, 3); setAdding(false); setQ('') }}
+                onClick={() => { onSetBond(node.key, n.key, rel, 3); setAdding(false); setQ('') }}
                 className="rounded-full border border-[#155e70] bg-[#22d3ee]/10 px-2 py-[3px] text-[11px] text-[#67e8f9]"
               >
                 {n.title.length > 14 ? n.title.slice(0, 13) + '…' : n.title}

@@ -56,7 +56,7 @@ async function mockSupabase(page: Page) {
     ] }))
   await page.route('**/*.supabase.co/rest/v1/book_link_strength**', (r) =>
     r.fulfill({ json: [
-      { a_key: 'サピエンス全史上', b_key: '銃・病原菌・鉄', supporters: 1, strength: 5 },
+      { from_key: '銃・病原菌・鉄', to_key: 'サピエンス全史上', rel: 'pre', supporters: 1, strength: 5 },
     ] }))
   await page.route('**/*.supabase.co/rest/v1/concepts**', (r) =>
     r.fulfill({ json: [
