@@ -82,7 +82,7 @@ def add(t, a, y, src, cat, star=None, shelf=False):
         if star is not None: n['s'] = star
         if shelf: n['shelf'] = True; n['cat'] = cat
         if len(t) < len(n['t']): n['t'] = t
-        if n['a'] in ('—',''): n['a'] = a
+        if n['a'] in ('—','') and a: n['a'] = a
         if y and not n['y']: n['y'] = y
         return n
     books[k] = {'k':k,'t':t,'a':a or '—','y':y or 0,'src':[src] if src else [],
