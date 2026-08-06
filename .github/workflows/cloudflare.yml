@@ -1,20 +1,68 @@
-name: Deploy to Cloudflare Workers
+name: Test & Deploy to Cloudflare Workers
 
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: cloudflare
+  group: cloudflare-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  test:
+    name: テスト（ロジック + アニメーション回帰）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install numpy
+      - run: npm install
+
+      - name: グラフを生成
+        run: npm run data
+
+      - name: ユニットテスト（グラフ構築・力学の性質）
+        run: npx vitest run
+
+      - name: 静的書き出し（e2e の対象）
+        run: npm run build
+
+      - name: Playwright ブラウザを取得
+        run: npx playwright install --with-deps chromium
+
+      # 物理アニメーションの回帰テスト:
+      #   - 有限時間で完全に沈静化する（震え禁止）
+      #   - オーバーレイ到着でグラフが再構築された後もドラッグが効く
+      #     （2026-08 に実際に起きた停止バグの再現条件）
+      #   - 絞り込みパネル開閉でキャンバスが追従する
+      #   - NDL 検索が UI に結果を出す
+      - name: ブラウザ回帰テスト
+        run: npx playwright test
+
+      - name: 失敗時のスクリーンショット等を保存
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: test-results/
+          retention-days: 7
+
   deploy:
     name: ビルドして Cloudflare Workers へ配信
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
