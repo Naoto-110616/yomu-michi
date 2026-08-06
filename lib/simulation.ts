@@ -4,8 +4,8 @@
  * Obsidian のグラフビューの挙動を再現する:
  *   - 通常時は alpha が単調に減衰して「静かに」止まる。振動しない。
  *   - ノードを掴んでいる間だけ alphaTarget を 0.3 に上げ、
- *     掴んだノードは fx/fy でポインタに固定し、まわりがバネで追従する。
- *   - 離すと alphaTarget を 0 に戻し、余韵を残してゆっくりと沈静化する。
+ *     掴んだノードは fx/fy でポインタに固定、まわりがバネで追従する。
+ *   - 離すと alphaTarget を 0 に戻し、余韻を残してゆっくり沈静化する。
  *   - ホバーや選択では物理を一切動かさない（動かすと震える）。
  *
  * 以前の自作エンジンは「ホーム位置へ戻る力」と「バネ」と「衝突の押し戻し」が
@@ -47,7 +47,7 @@ interface SimLink {
 const DISTANCE: Record<RelationType, number> = {
   member: 48, bond: 66, next: 34, pre: 60, alt: 84, counter: 98,
 }
-/** バネの強さ。別視点は弱くして「うすら引き合う」程度に */
+/** バネの強さ。別視点は弱くして「うっすら引き合う」程度に */
 const STRENGTH: Record<RelationType, number> = {
   member: 0.5, bond: 0.18, next: 0.45, pre: 0.32, alt: 0.06, counter: 0.1,
 }
@@ -101,7 +101,7 @@ export class Simulation {
       .force('link', this.linkForce as never)
       .force('charge', forceManyBody<SimNode>().strength(-55).distanceMax(340).theta(0.9))
       .force('collide', forceCollide<SimNode>((d) => d.r + 3).strength(0.7))
-      // ホームへの弱い引力。クラスタ構造を保ちつつ、バネと喧噂しない強さ
+      // ホームへの弱い引力。クラスタ構造を保ちつつ、バネと喧嘩しない強さ
       .force('homeX', forceX<SimNode>((d) => d.hx).strength(0.035))
       .force('homeY', forceY<SimNode>((d) => d.hy).strength(0.035))
   }
@@ -138,7 +138,7 @@ export class Simulation {
     this.sim.alpha(Math.max(this.sim.alpha(), 0.5))
   }
 
-  /* ── 不透明度（物理とは独立） ─────────── */
+  /* ── 不透明度（物理とは独立） ─────────────── */
 
   setFadeTargets(fn: (i: number) => number) {
     for (const i of this.activeList) this.fadeTarget[i] = fn(i)
@@ -156,7 +156,7 @@ export class Simulation {
     return moving
   }
 
-  /* ── 1フレーム ──────────────── */
+  /* ── 1フレーム ──────────────────────────── */
 
   /** 進めた結果まだ動いているなら true。false になったら描画ループを止めてよい */
   step(): boolean {
@@ -166,7 +166,7 @@ export class Simulation {
     return hot || fading
   }
 
-  /* ── ドラッグ（d3 の作法そのまま） ─────── */
+  /* ── ドラッグ（d3 の作法そのまま） ─────────── */
 
   startDrag(i: number) {
     this.dragging = i

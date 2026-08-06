@@ -55,9 +55,9 @@ export const CATEGORY_META: Record<Category, { label: string; color: string }> =
   lit:    { label: '文芸',       color: '#f9a8d4' },
   mind:   { label: '人の心',     color: '#f472b6' },
   design: { label: 'つくる側',   color: '#fdba74' },
-  comedy: { label: 'お笑い', color: '#facc15' },
+  comedy: { label: 'お笑い',     color: '#facc15' },
   work:   { label: '仕事・経済', color: '#a3e635' },
-  sci:    { label: '科学',     color: '#86efac' },
+  sci:    { label: '科学',       color: '#86efac' },
 }
 
 export const STAR_COLOR: Record<number, string> = {
@@ -284,8 +284,8 @@ export function buildGraph(
     nodes[e.to].degree++
   })
 
-  // ── 階層を決める ───────────────────────
-  // 概念 → 読んだ本 → そのどちらかに1ホップで絋がる本 → それ以外
+  // ── 階層を決める ──────────────────────────────
+  // 概念 → 読んだ本 → そのどちらかに1ホップで繋がる本 → それ以外
   const core = new Set<number>()
   nodes.forEach((n) => {
     if (n.kind === 'concept') { n.tier = 'concept'; core.add(n.i) }
@@ -306,7 +306,7 @@ export function buildGraph(
   }
 }
 
-/* ── 表示のためのヘルパー ───────────────────── */
+/* ── 表示のためのヘルパー ───────────────────────── */
 
 /** ネットワークのサイズ = 何段目まで出すか */
 export const DEPTHS: { id: number; label: string; tiers: Tier[] }[] = [
