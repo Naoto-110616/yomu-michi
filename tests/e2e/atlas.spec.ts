@@ -66,6 +66,15 @@ async function mockSupabase(page: Page) {
     r.fulfill({ json: [
       { key: 'isbn:9784622039709', title: '夜と霧 新版', author: 'フランクル', year: 2002, cat: 'mind', isbn: '9784622039709' },
     ] }))
+  await page.route('**/*.supabase.co/rest/v1/proposal_status**', (r) =>
+    r.fulfill({ json: [
+      {
+        id: '00000000-0000-4000-8000-000000000001', kind: 'alt',
+        from_key: '三体', to_key: 'プロジェクト・ヘイル・メアリー上',
+        why: 'テスト用のAI提案の理由', confidence: 0.85, evidence: null,
+        yes: 0, no: 0, unsure: 0, status: 'proposed',
+      },
+    ] }))
   await page.route('**/*.supabase.co/auth/**', (r) => r.fulfill({ json: {} }))
 }
 
@@ -159,6 +168,26 @@ test('絞り込みパネルの開閉でキャンバスが追従し、地図が�
   await page.waitForTimeout(700)
   const h2 = await page.evaluate(() => document.querySelector('canvas')!.clientHeight)
   expect(h2).toBe(h0) // 閉じれば元どおり
+  expect(errs).toEqual([])
+})
+
+test('AI推論ループ: 提案が検証カードに出て、未ログインでは判定できない', async ({ page }) => {
+  const errs = collectErrors(page)
+  await mockSupabase(page)
+  await page.goto(baseURL, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(2000)
+
+  // 提案があるあいだ、左下にチップが出る
+  const chip = page.getByRole('button', { name: /AIの提案 1件/ })
+  await expect(chip).toBeVisible()
+  await chip.click()
+
+  // カード: 対象・理由・自信度・判定不可の案内
+  await expect(page.getByText('AIが仮に張った線 — 合っていますか？')).toBeVisible()
+  await expect(page.getByText('テスト用のAI提案の理由')).toBeVisible()
+  await expect(page.getByText('85%')).toBeVisible()
+  await expect(page.getByText('ログインすると判定できます')).toBeVisible()
+  await expect(page.getByText('まだ判定がありません')).toBeVisible()
   expect(errs).toEqual([])
 })
 
