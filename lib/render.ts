@@ -59,9 +59,9 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     // 強度1→細く控えめ、強度5→太く明るく。人数はわずかに輝きへ
     const tieWidth = 0.8 + (w - 1) * 0.95
     const tieGlow = Math.min(0.4 + (w - 1) * 0.12 + Math.min((e.supporters ?? 1) - 1, 4) * 0.04, 0.95)
-    ctx.globalAlpha = a * (e.type === 'alt' ? 0.36 : tie ? tieGlow : 0.85)
+    ctx.globalAlpha = a * (e.type === 'alt' ? 0.36 : e.type === 'overlap' ? 0.3 : tie ? tieGlow : 0.85)
     ctx.strokeStyle = meta.color
-    ctx.lineWidth = (e.type === 'alt' ? 0.8 : tie ? tieWidth : 1.7) / k
+    ctx.lineWidth = (e.type === 'alt' || e.type === 'overlap' ? 0.8 : tie ? tieWidth : 1.7) / k
     ctx.setLineDash(meta.dashed ? [3 / k, 3.5 / k] : [])
     ctx.beginPath()
     ctx.moveTo(P[e.from].x, P[e.from].y)

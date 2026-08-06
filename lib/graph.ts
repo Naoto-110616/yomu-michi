@@ -8,7 +8,7 @@
  * このプロダクトの中身は、単なる「関連」ではなく関係の種類を区別することにある。
  */
 
-export const RELATIONS = ['member', 'bond', 'follow', 'pre', 'next', 'alt', 'counter'] as const
+export const RELATIONS = ['member', 'bond', 'follow', 'overlap', 'pre', 'next', 'alt', 'counter'] as const
 export type RelationType = (typeof RELATIONS)[number]
 
 export const RELATION_META: Record<
@@ -26,6 +26,10 @@ export const RELATION_META: Record<
   follow: {
     label: 'フォロー', color: '#f0abfc', dashed: false, directed: true,
     hint: 'アカウント同士の紐付き',
+  },
+  overlap: {
+    label: '重なり', color: '#5eead4', dashed: true, directed: false,
+    hint: '同じ本を読んでいる（島と島の橋）',
   },
   pre: {
     label: '前提', color: '#f59e0b', dashed: false, directed: true,
@@ -331,7 +335,7 @@ export function nodeRadius(n: BookNode, scale = 1, boost = 0): number {
   return (base + Math.log2(1 + boost) * 2.2) * scale
 }
 
-export type ViewMode = 'all' | 'shelf' | 'human' | 'social'
+export type ViewMode = 'all' | 'shelf' | 'human'
 
 export function nodeColor(n: BookNode, mode: ViewMode): string {
   if (n.kind === 'account') return '#f0abfc'
@@ -361,10 +365,10 @@ export function matchesQuery(n: BookNode, q: string): boolean {
 }
 
 
-/* ── フォローの地図 ──────────────────────────────
-   自分の地図が中央、フォロー先のアカウントがそれぞれ自分の小さな地図を
-   持って周囲に浮かび、フォロー線で繋がる。同じ本を読んでいる者同士は
-   クラスタ間に「同じ本」の橋が架かる。 */
+/* ── フォローの島 ─────────────────────────────────
+   自分の全体図はそのまま中央に。フォローしている人の地図は
+   「島」として周縁に常在し、パン／ズームで遊びに行ける。
+   図は分ける（島ごとに別ノード）。重なりは島と島の橋で見せる。 */
 
 export interface SocialInput {
   me: { id: string; username: string }
@@ -376,50 +380,62 @@ export interface SocialInput {
   titles: Map<string, { title: string; cat: string }>
 }
 
-export function buildSocialGraph(input: SocialInput): Graph {
-  const nodes: BookNode[] = []
-  const edges: Edge[] = []
+export function attachFollowIslands(base: Graph, input: SocialInput): Graph {
+  const nodes = base.nodes
+  const edges = base.edges
+  const byKey = new Map(nodes.map((n) => [n.key, n.i]))
   const acctIndex = new Map<string, number>()
 
-  const addNode = (n: Omit<BookNode, 'i' | 'degree' | 'sources'>) => {
+  const add = (n: Omit<BookNode, 'i' | 'degree' | 'sources'>) => {
     const node: BookNode = { ...n, i: nodes.length, degree: 0, sources: [] }
     nodes.push(node)
+    byKey.set(node.key, node.i)
     return node
   }
 
-  const people = [input.me, ...input.accounts.filter((a) => a.id !== input.me.id)]
-  people.forEach((person, pi) => {
-    // 自分は中央、フォロー先は周囲の円環に
-    const angle = ((pi - 1) / Math.max(people.length - 1, 1)) * Math.PI * 2
-    const cx = pi === 0 ? 0 : Math.cos(angle) * 680
-    const cy = pi === 0 ? 0 : Math.sin(angle) * 560
-    const acct = addNode({
+  // 自分のアンカー（地図の中央）。ここからフォロー線が伸びる
+  const me = add({
+    key: `acct:${input.me.id}`, kind: 'account', dynamic: true,
+    title: `${input.me.username}（あなた）`, author: '', desc: '', year: 0,
+    cat: 'phil' as Category, star: null, shelf: false, x: 0, y: 0, tier: 'concept',
+  })
+  acctIndex.set(input.me.id, me.i)
+
+  const others = input.accounts.filter((a) => a.id !== input.me.id)
+  others.forEach((person, pi) => {
+    // 自分の図（±900）の外側に島を置く
+    const ang = (pi / Math.max(others.length, 1)) * Math.PI * 2 - Math.PI / 2
+    const cx = Math.cos(ang) * 1700
+    const cy = Math.sin(ang) * 1380
+    const acct = add({
       key: `acct:${person.id}`, kind: 'account', dynamic: true,
       title: person.username, author: '', desc: '', year: 0,
-      cat: 'phil' as Category, star: null, shelf: false,
-      x: cx, y: cy, tier: 'concept',
+      cat: 'phil' as Category, star: null, shelf: false, x: cx, y: cy, tier: 'concept',
     })
     acctIndex.set(person.id, acct.i)
 
-    // その人の本棚を小さなクラスタとして展開
     const shelf = input.shelves.get(person.id) ?? new Map<string, number>()
     let bi = 0
     for (const [bookKey, star] of shelf) {
       const meta = input.titles.get(bookKey)
-      const golden = bi * 2.39996 // 黄金角で放射状に
-      const r = 90 + (bi % 5) * 26
-      const book = addNode({
+      const golden = bi * 2.39996
+      const r = 80 + (bi % 6) * 24
+      const book = add({
         key: `${person.id}::${bookKey}`, kind: 'book', dynamic: true,
         title: meta?.title ?? bookKey.replace(/^isbn:/, ''), author: '', desc: '', year: 0,
         cat: (meta?.cat as Category) ?? 'lit', star, shelf: true,
         x: cx + Math.cos(golden) * r, y: cy + Math.sin(golden) * r, tier: 'shelf',
       })
       edges.push({ from: acct.i, to: book.i, type: 'member', why: `${person.username} の本棚`, weight: 1 })
+      // 重なり: 自分の地図に同じ本があれば橋を架ける
+      const mine = byKey.get(bookKey)
+      if (mine !== undefined && !nodes[mine].dynamic) {
+        edges.push({ from: mine, to: book.i, type: 'overlap', why: '同じ本を読んでいる', weight: 1 })
+      }
       bi++
     }
   })
 
-  // フォロー線（取得できた範囲すべて）
   for (const f of input.follows) {
     const a = acctIndex.get(f.follower)
     const b = acctIndex.get(f.followee)
@@ -427,32 +443,13 @@ export function buildSocialGraph(input: SocialInput): Graph {
     edges.push({ from: a, to: b, type: 'follow', why: 'フォローしている', weight: 3 })
   }
 
-  // 同じ本の橋（クラスタ間の重なりを見せる）
-  const byBook = new Map<string, number[]>()
-  for (const n of nodes) {
-    if (n.kind !== 'book') continue
-    const bookKey = n.key.split('::')[1]
-    const list = byBook.get(bookKey)
-    if (list) list.push(n.i)
-    else byBook.set(bookKey, [n.i])
-  }
-  for (const [, list] of byBook) {
-    for (let i = 1; i < list.length; i++) {
-      edges.push({ from: list[0], to: list[i], type: 'alt', why: '同じ本を読んでいる', weight: 1 })
-    }
-  }
-
   const adjacency: number[][] = nodes.map(() => [])
+  for (const n of nodes) n.degree = 0
   edges.forEach((e, i) => {
     adjacency[e.from].push(i)
     adjacency[e.to].push(i)
     nodes[e.from].degree++
     nodes[e.to].degree++
   })
-
-  return {
-    nodes, edges, adjacency,
-    meta: { nodes: nodes.length, edges: edges.length, shelf: 0, byType: {}, raw: nodes.length },
-    concepts: [],
-  }
+  return { ...base, nodes, edges, adjacency, meta: { ...base.meta, nodes: nodes.length, edges: edges.length } }
 }
