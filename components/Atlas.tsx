@@ -8,7 +8,7 @@ import {
 import { Simulation } from '@/lib/simulation'
 import { fitTransform, hitTest, render, toWorld, type RenderState, type Transform } from '@/lib/render'
 import { getSupabase } from '@/lib/supabase'
-import { EMPTY_OVERLAY, bondPair, fetchOverlay, fetchPersonalView, fetchSocial, ndlKey, type NdlItem, type Overlay, type Profile } from '@/lib/overlay'
+import { EMPTY_OVERLAY, bondPair, fetchOverlay, fetchPersonalView, fetchSocial, ndlKey, normalizeTitleKey, type NdlItem, type Overlay, type Profile } from '@/lib/overlay'
 import AccountMenu, { type SessionUser } from './AccountMenu'
 import Controls from './Controls'
 import DetailPanel from './DetailPanel'
@@ -574,7 +574,10 @@ export default function Atlas({ payload }: { payload: Payload }) {
   const materialize = useCallback(async (item: NdlItem) => {
     const sb = getSupabase()
     if (!sb || !user) return
-    const key = ndlKey(item)
+    // 焼き込みの本と同じタイトルなら既存キーに合流する（重複ノードを作らない）
+    const baked = normalizeTitleKey(item.title)
+    const bakedExists = baked && graph.nodes.some((n) => !n.dynamic && n.kind === 'book' && n.key === baked)
+    const key = bakedExists ? baked : ndlKey(item)
     await sb.from('books').upsert({
       key, isbn: item.isbn || null, title: item.title, author: item.author,
       publisher: item.publisher, year: item.year, cat: 'lit', created_by: user.id,
