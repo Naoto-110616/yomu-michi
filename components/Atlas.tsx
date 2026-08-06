@@ -534,6 +534,23 @@ export default function Atlas({ payload }: { payload: Payload }) {
     reloadOverlay()
   }, [user, reloadOverlay])
 
+  /* ── ブクログの本棚をワンタップで再現 ─────────
+     焼き込みペイロードの93冊（=ブクログ由来）を自分の shelf に一括コピーする。 */
+  const importSampleShelf = useCallback(async (): Promise<number> => {
+    const sb = getSupabase()
+    if (!sb || !user) return 0
+    const rows = payload.n
+      .filter((a) => a[5])
+      .map((a) => ({ user_id: user.id, book_key: a[11], star: a[4] < 0 ? 0 : a[4] }))
+    for (let i = 0; i < rows.length; i += 50) {
+      const { error } = await sb.from('shelf').upsert(rows.slice(i, i + 50))
+      if (error) return i
+    }
+    const { data } = await sb.from('shelf').select('book_key, star')
+    setUserShelf(new Map((data ?? []).map((r) => [r.book_key as string, r.star as number])))
+    return rows.length
+  }, [user, payload])
+
   /* ── フォロー ───────────────────────────── */
   const toggleFollow = useCallback(async (profileId: string, on: boolean) => {
     const sb = getSupabase()
@@ -604,6 +621,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
             viewingId={viewing?.id ?? null}
             onToggleFollow={toggleFollow}
             onView={(p) => setViewing(p)}
+            onImportSample={importSampleShelf}
           />
           <button
             onClick={() => setControlsOpen((v) => !v)}
@@ -679,6 +697,14 @@ export default function Atlas({ payload }: { payload: Payload }) {
               .filter((b) => b.otherIndex >= 0)
               .sort((a, b) => b.strength - a.strength)}
             allConcepts={overlay.concepts.map((c) => ({ key: c.key, label: c.label }))}
+            shelfBooks={graph.nodes
+              .filter((n) => n.kind === 'book' && n.shelf)
+              .map((n) => ({ key: n.key, title: n.title }))}
+            linkedBookKeys={new Set(
+              effectiveOverlay.links
+                .filter((l) => l.concept === graph.nodes[selected].key)
+                .map((l) => l.book)
+            )}
             onSetTie={setTie}
             onSetBond={setBond}
             onCreateConcept={createConcept}
