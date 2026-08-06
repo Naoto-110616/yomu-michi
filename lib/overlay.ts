@@ -40,6 +40,34 @@ export interface Profile {
   username: string
 }
 
+/** AI推論ループの提案（未検証エッジ）と、その判定状況 */
+export interface Proposal {
+  id: string
+  kind: 'pre' | 'next' | 'alt' | 'counter' | 'member'
+  /** member のときは概念キー。それ以外は from→to（pre は from が前提側） */
+  from: string
+  to: string
+  why: string
+  confidence: number
+  evidence: string | null
+  yes: number
+  no: number
+  unsure: number
+  status: 'proposed' | 'verified' | 'rejected' | 'disputed'
+  /** 自分の判定。未判定なら null */
+  myVote: 'yes' | 'no' | 'unsure' | null
+}
+
+/**
+ * 却下率。AIの精度をユーザーが自分で較正するための数字なので隠さない。
+ * 判定が1件も無いあいだは null（率を出せない）。
+ */
+export function rejectRate(proposals: Proposal[], kind?: Proposal['kind']): number | null {
+  const judged = proposals.filter((p) => (!kind || p.kind === kind) && p.status !== 'proposed')
+  if (!judged.length) return null
+  return judged.filter((p) => p.status === 'rejected').length / judged.length
+}
+
 export interface Overlay {
   books: OverlayBook[]
   concepts: OverlayConcept[]
@@ -50,17 +78,19 @@ export interface Overlay {
   profiles: Profile[]
   /** 自分がフォローしている user id */
   follows: Set<string>
+  /** AI推論ループの提案（全状態。地図に描くのは proposed / disputed だけ） */
+  proposals: Proposal[]
 }
 
 export const EMPTY_OVERLAY: Overlay = {
   books: [], concepts: [], links: [], bonds: [],
-  mine: new Map(), profiles: [], follows: new Set(),
+  mine: new Map(), profiles: [], follows: new Set(), proposals: [],
 }
 
 export async function fetchOverlay(userId: string | null): Promise<Overlay> {
   const sb = getSupabase()
   if (!sb) return EMPTY_OVERLAY
-  const [strength, bonds, concepts, books, profiles, mineLinks, mineBonds, follows] = await Promise.all([
+  const [strength, bonds, concepts, books, profiles, mineLinks, mineBonds, follows, proposals, myVerdicts] = await Promise.all([
     sb.from('concept_link_strength').select('concept_key, book_key, supporters, strength'),
     sb.from('book_link_strength').select('from_key, to_key, rel, supporters, strength'),
     sb.from('concepts').select('key, label, description, official'),
@@ -69,6 +99,8 @@ export async function fetchOverlay(userId: string | null): Promise<Overlay> {
     userId ? sb.from('concept_links').select('concept_key, book_key, strength').eq('user_id', userId) : Promise.resolve({ data: [] }),
     userId ? sb.from('book_links').select('from_key, to_key, rel, strength').eq('user_id', userId) : Promise.resolve({ data: [] }),
     userId ? sb.from('follows').select('followee').eq('follower', userId) : Promise.resolve({ data: [] }),
+    sb.from('proposal_status').select('id, kind, from_key, to_key, why, confidence, evidence, yes, no, unsure, status'),
+    userId ? sb.from('verdicts').select('proposal_id, vote').eq('user_id', userId) : Promise.resolve({ data: [] }),
   ])
   type Row = Record<string, unknown>
   const mine = new Map<string, number>()
@@ -98,6 +130,25 @@ export async function fetchOverlay(userId: string | null): Promise<Overlay> {
     profiles: (profiles.data ?? []).map((r) => ({ id: r.id as string, username: r.username as string })),
     mine,
     follows: new Set((((follows as { data: Row[] | null }).data) ?? []).map((r) => r.followee as string)),
+    proposals: (() => {
+      const votes = new Map<string, string>()
+      for (const r of ((myVerdicts as { data: Row[] | null }).data ?? []))
+        votes.set(r.proposal_id as string, r.vote as string)
+      return (proposals.data ?? []).map((r) => ({
+        id: r.id as string,
+        kind: r.kind as Proposal['kind'],
+        from: r.from_key as string,
+        to: r.to_key as string,
+        why: r.why as string,
+        confidence: Number(r.confidence ?? 0.5),
+        evidence: (r.evidence as string) ?? null,
+        yes: Number(r.yes ?? 0),
+        no: Number(r.no ?? 0),
+        unsure: Number(r.unsure ?? 0),
+        status: (r.status as Proposal['status']) ?? 'proposed',
+        myVote: (votes.get(r.id as string) as Proposal['myVote']) ?? null,
+      }))
+    })(),
   }
 }
 
