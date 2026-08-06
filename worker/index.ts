@@ -1,12 +1,11 @@
 /**
- * 静的アセットの前に立つ小さな Worker。
+ * Static assets の前に立つ小さな Worker。
  *
- * /api/ndl?q=… — 国立国会図書館サーチ（OpenSearch）のプロキシ。
- *   NDL は無料・キー不要で数千万件の書誌を検索できる。ここを通すことで
- *   CORS を気にせず同一オリジンで呼べて、エッジキャッシュも効く。
- *   書誌データベースを 1 円も持たずに「世界中の本」を検索対象にする要。
+ * /api/ndl?q=... — 国立国会図書館サーチ (OpenSearch) のプロキシ。
+ * 無料・キー不要で数千万件の書誌を検索できる。同一オリジンで呼べて
+ * エッジキャッシュも効く。カタログを持たずに世界中の本を扱う要。
  *
- * それ以外のパスは静的アセット（Next.js の書き出し）にフォールバックする。
+ * それ以外のパスは静的アセット (Next.js の書き出し) にフォールバック。
  */
 
 interface Env {
@@ -28,7 +27,7 @@ const pick = (src: string, re: RegExp): string => {
 
 const decodeEntities = (s: string) =>
   s
-    .replace(/<!\[CDATA\[(.*?)\]\]>/gs, '$1')
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -47,10 +46,11 @@ function parseOpenSearch(xml: string): NdlItem[] {
     ).replace(/,\s*$/, '')
     const publisher = decodeEntities(pick(body, /<dc:publisher>([\s\S]*?)<\/dc:publisher>/))
     const isbn = pick(body, /dcndl:ISBN">([-0-9Xx]+)</).replace(/-/g, '')
-    const date = pick(body, /<pubDate>([\s\S]*?)<\/pubDate>/) || pick(body, /<dcterms:issued[^>]*>([\s\S]*?)<\/dcterms:issued>/)
+    const date =
+      pick(body, /<pubDate>([\s\S]*?)<\/pubDate>/) ||
+      pick(body, /<dcterms:issued[^>]*>([\s\S]*?)<\/dcterms:issued>/)
     const ym = date.match(/(\d{4})/)
     const year = ym ? Number(ym[1]) : 0
-    // 同じ本が版違いで並ぶので ISBN（無ければタイトル+著者）でまとめる
     const dedupeKey = isbn || `${title}|${author}`
     if (seen.has(dedupeKey)) continue
     seen.add(dedupeKey)
@@ -59,32 +59,57 @@ function parseOpenSearch(xml: string): NdlItem[] {
   return items
 }
 
+/**
+ * 失敗しても常に 200 で JSON を返す。
+ * 502 を返すと中間のプロキシやブラウザで本文が読めず、原因が闇に沈むため。
+ * クライアントは items が空で error があれば失敗として扱う。
+ */
 async function handleNdl(req: Request): Promise<Response> {
-  const q = new URL(req.url).searchParams.get('q')?.trim() ?? ''
-  if (!q) return Response.json({ items: [], error: 'q is required' }, { status: 400 })
+  const url = new URL(req.url)
+  const q = url.searchParams.get('q')?.trim() ?? ''
+  if (!q) return Response.json({ items: [], error: 'q is required' })
 
-  // エッジキャッシュ（同じ検索語は 1 日再利用）
   const cache = (caches as unknown as { default: Cache }).default
   const cacheKey = new Request(`https://cache.yomu-michi/ndl?q=${encodeURIComponent(q)}`)
   const hit = await cache.match(cacheKey)
   if (hit) return hit
 
-  const upstream = `https://ndlsearch.ndl.go.jp/api/opensearch?any=${encodeURIComponent(q)}&cnt=20`
-  const res = await fetch(upstream, {
-    headers: { 'User-Agent': 'yomu-michi/0.1 (book graph; contact via github.com/Naoto-110616/yomu-michi)' },
-    signal: AbortSignal.timeout(10_000),
-  })
-  if (!res.ok) {
-    return Response.json({ items: [], error: `NDL ${res.status}` }, { status: 502 })
+  const attempts: string[] = []
+  const endpoints = [
+    `https://ndlsearch.ndl.go.jp/api/opensearch?any=${encodeURIComponent(q)}&cnt=20`,
+    `https://ndlsearch.ndl.go.jp/api/opensearch?title=${encodeURIComponent(q)}&cnt=20`,
+  ]
+
+  for (const upstream of endpoints) {
+    try {
+      const res = await fetch(upstream, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; yomu-michi/0.1; +https://github.com/Naoto-110616/yomu-michi)',
+          Accept: 'application/xml, text/xml, */*',
+        },
+        signal: AbortSignal.timeout(9000),
+      })
+      if (!res.ok) {
+        attempts.push(`${upstream} -> HTTP ${res.status}`)
+        continue
+      }
+      const xml = await res.text()
+      const items = parseOpenSearch(xml).slice(0, 12)
+      if (items.length === 0 && !xml.includes('<item>')) {
+        attempts.push(`${upstream} -> ok but no items (head: ${xml.slice(0, 120).replace(/\s+/g, ' ')})`)
+        continue
+      }
+      const out = Response.json(
+        { items },
+        { headers: { 'Cache-Control': 'public, max-age=86400', 'Access-Control-Allow-Origin': '*' } }
+      )
+      await cache.put(cacheKey, out.clone())
+      return out
+    } catch (e) {
+      attempts.push(`${upstream} -> ${String(e)}`)
+    }
   }
-  const xml = await res.text()
-  const items = parseOpenSearch(xml).slice(0, 12)
-  const out = Response.json(
-    { items },
-    { headers: { 'Cache-Control': 'public, max-age=86400', 'Access-Control-Allow-Origin': '*' } }
-  )
-  await cache.put(cacheKey, out.clone())
-  return out
+  return Response.json({ items: [], error: 'NDL unreachable', attempts })
 }
 
 export default {
@@ -94,11 +119,11 @@ export default {
       try {
         return await handleNdl(req)
       } catch (e) {
-        return Response.json({ items: [], error: String(e) }, { status: 502 })
+        return Response.json({ items: [], error: String(e) })
       }
     }
     if (url.pathname === '/api/health') {
-      return Response.json({ ok: true })
+      return Response.json({ ok: true, at: 'worker' })
     }
     return env.ASSETS.fetch(req)
   },
