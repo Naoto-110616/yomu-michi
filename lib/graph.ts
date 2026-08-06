@@ -86,7 +86,7 @@ export const TIER_META: Record<Tier, { label: string; scale: number }> = {
 
 export interface BookNode {
   i: number
-  /** 安定キー（正規化タイトル / isbn:xxx）。本棚・紐付けはこのキーで繊がる */
+  /** 安定キー（正規化タイトル / isbn:xxx）。本棚・紐付けはこのキーで繋がる */
   key: string
   /** DB から来た動的ノードか（NDL検索で実体化した本・ユーザー概念） */
   dynamic?: boolean
@@ -144,7 +144,7 @@ export interface Graph {
  * shelfOverride:
  *   null      → 焼き込みの本棚（ゲスト表示 = 尚斗の93冊）
  *   Map       → ログイン中アカウントの本棚。key → ★（0 = 未評価）。
- *               空の Map なら「まだ１冊も読んでいないアカウント」として描く。
+ *               空の Map なら「まだ1冊も読んでいないアカウント」として描く。
  */
 export type ShelfOverride = Map<string, number> | null
 
@@ -315,8 +315,8 @@ export function buildGraph(
     nodes[e.to].degree++
   })
 
-  // ── 階層を決める ─────────────────────────
-  // 概念 → 読んだ本 → そのどちらかに1ホップで繊がる本 → それ以外
+  // ── 階層を決める ──────────────────────────────
+  // 概念 → 読んだ本 → そのどちらかに1ホップで繋がる本 → それ以外
   const core = new Set<number>()
   nodes.forEach((n) => {
     if (n.kind === 'concept') { n.tier = 'concept'; core.add(n.i) }
@@ -337,7 +337,7 @@ export function buildGraph(
   }
 }
 
-/* ── 表示のためのヘルパー ─────────────────── */
+/* ── 表示のためのヘルパー ───────────────────────── */
 
 /** ネットワークのサイズ = 何段目まで出すか */
 export const DEPTHS: { id: number; label: string; tiers: Tier[] }[] = [
@@ -388,9 +388,9 @@ export function matchesQuery(n: BookNode, q: string): boolean {
 }
 
 
-/* ── フォローの島 ────────────────────────────
+/* ── フォローの島 ─────────────────────────────────
    自分の全体図はそのまま中央に。フォローしている人の地図は
-   「島」として周縁に常在し、パン／ズームで遷びに行ける。
+   「島」として周縁に常在し、パン／ズームで遊びに行ける。
    図は分ける（島ごとに別ノード）。重なりは島と島の橋で見せる。 */
 
 export interface SocialInput {
@@ -426,7 +426,7 @@ export function attachFollowIslands(base: Graph, input: SocialInput): Graph {
 
   const others = input.accounts.filter((a) => a.id !== input.me.id)
   others.forEach((person, pi) => {
-    // 自分の図（＋900）の外側に島を置く
+    // 自分の図（±900）の外側に島を置く
     const ang = (pi / Math.max(others.length, 1)) * Math.PI * 2 - Math.PI / 2
     const cx = Math.cos(ang) * 1700
     const cy = Math.sin(ang) * 1380
