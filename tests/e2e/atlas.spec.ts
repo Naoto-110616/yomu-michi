@@ -191,6 +191,20 @@ test('AI推論ループ: 提案が検証カードに出て、未ログインで�
   expect(errs).toEqual([])
 })
 
+test('ログインメニュー: ソーシャルログインとマジックリンクの導線が出る', async ({ page }) => {
+  const errs = collectErrors(page)
+  await mockSupabase(page)
+  await page.goto(baseURL, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(1500)
+
+  await page.getByRole('button', { name: 'ログイン', exact: true }).click()
+  await expect(page.getByRole('button', { name: /Google で続ける/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /GitHub で続ける/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /メールのリンクでログイン/ })).toBeVisible()
+  await expect(page.getByText('デモアカウント')).toBeVisible()
+  expect(errs).toEqual([])
+})
+
 test('世界の本の検索（NDLモック）が結果を表示する', async ({ page }) => {
   const errs = collectErrors(page)
   await mockSupabase(page)
