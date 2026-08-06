@@ -156,7 +156,7 @@ export function buildGraph(p: Payload): Graph {
     nodes[e.to].degree++
   })
 
-  // ── 階層を決める ────────────────────────
+  // ── 階層を決める ──────────────────────────────
   // 概念 → 読んだ本 → そのどちらかに1ホップで繋がる本 → それ以外
   const core = new Set<number>()
   nodes.forEach((n) => {

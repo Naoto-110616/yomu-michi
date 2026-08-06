@@ -42,7 +42,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   const k = Math.max(T.k, 0.25)
   const focus = s.selected ?? s.hovered
 
-  // ── エッジ ─────────────────────
+  // ── エッジ ─────────────────────────────
   for (const ei of s.visibleEdges) {
     const e = graph.edges[ei]
     const meta = RELATION_META[e.type]
@@ -80,7 +80,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     }
   }
 
-  // ── ノード ─────────────────────
+  // ── ノード ─────────────────────────────
   for (const i of sim.activeList) {
     const n = graph.nodes[i]
     const a = alpha[i]
@@ -176,7 +176,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   ctx.globalAlpha = 1
 }
 
-/* ── 座標変換 / ヒットテスト ─────────────────────── */
+/* ── 座標変換 / ヒットテスト ───────────────────────── */
 
 export const toWorld = (T: Transform, sx: number, sy: number) => ({
   x: (sx - T.x) / T.k,
