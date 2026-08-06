@@ -243,6 +243,35 @@ export function normalizeTitleKey(raw: string): string {
 export const bondPair = (x: string, y: string): [string, string] => (x < y ? [x, y] : [y, x])
 
 
+/* ── 本棚の重なり → フォロー候補 ─────────────────────
+   「あなたと7冊重なっている人」。同じ本を読んでいる人こそ、
+   地図を見に行く価値がある人なので、重なり冊数で候補を並べる。 */
+
+/** 全ユーザーの棚（user_id, book_key）。件数は利用量に比例なので当面そのまま */
+export async function fetchAllShelves(): Promise<{ user_id: string; book_key: string }[]> {
+  const sb = getSupabase()
+  if (!sb) return []
+  const { data } = await sb.from('shelf').select('user_id, book_key')
+  return (data ?? []) as { user_id: string; book_key: string }[]
+}
+
+/** userId → 自分の棚と重なっている本のキー一覧（自分自身は除く） */
+export function computeOverlaps(
+  myId: string,
+  myShelf: Set<string>,
+  rows: { user_id: string; book_key: string }[],
+): Map<string, string[]> {
+  const m = new Map<string, string[]>()
+  for (const r of rows) {
+    if (r.user_id === myId) continue
+    if (!myShelf.has(r.book_key)) continue
+    const arr = m.get(r.user_id)
+    if (arr) arr.push(r.book_key)
+    else m.set(r.user_id, [r.book_key])
+  }
+  return m
+}
+
 /* ── フォローの地図のデータ: 自分 + フォロー先の本棚とフォロー網 ── */
 
 export async function fetchSocial(me: { id: string; email: string }) {
