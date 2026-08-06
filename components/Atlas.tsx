@@ -8,7 +8,7 @@ import {
 import { Simulation } from '@/lib/simulation'
 import { fitTransform, hitTest, render, toWorld, type RenderState, type Transform } from '@/lib/render'
 import { getSupabase } from '@/lib/supabase'
-import { EMPTY_OVERLAY, bondPair, computeOverlaps, fetchAllShelves, fetchOverlay, fetchPersonalView, fetchSocial, ndlKey, normalizeTitleKey, type NdlItem, type Overlay, type Profile, type Proposal } from '@/lib/overlay'
+import { EMPTY_OVERLAY, bondPair, computeOverlaps, fetchAllShelves, fetchBooklogShelf, fetchOverlay, fetchPersonalView, fetchSocial, ndlKey, normalizeTitleKey, type NdlItem, type Overlay, type Profile, type Proposal } from '@/lib/overlay'
 import AccountMenu, { type SessionUser } from './AccountMenu'
 import Controls from './Controls'
 import DetailPanel from './DetailPanel'
@@ -602,23 +602,6 @@ export default function Atlas({ payload }: { payload: Payload }) {
     reloadOverlay()
   }, [user, reloadOverlay])
 
-  /* ── ブクログの本棚をワンタップで再現 ─────────
-     焼き込みペイロードの93冊（=ブクログ由来）を自分の shelf に一括コピーする。 */
-  const importSampleShelf = useCallback(async (): Promise<number> => {
-    const sb = getSupabase()
-    if (!sb || !user) return 0
-    const rows = payload.n
-      .filter((a) => a[5])
-      .map((a) => ({ user_id: user.id, book_key: a[11], star: a[4] < 0 ? 0 : a[4] }))
-    for (let i = 0; i < rows.length; i += 50) {
-      const { error } = await sb.from('shelf').upsert(rows.slice(i, i + 50))
-      if (error) return i
-    }
-    const { data } = await sb.from('shelf').select('book_key, star')
-    setUserShelf(new Map((data ?? []).map((r) => [r.book_key as string, r.star as number])))
-    return rows.length
-  }, [user, payload])
-
   /* ── ブクログCSVの取り込み（Shift_JIS対応・ヒューリスティック） ── */
   const importBooklogCsv = useCallback(async (file: File): Promise<number> => {
     const sb = getSupabase()
@@ -669,6 +652,46 @@ export default function Atlas({ payload }: { payload: Payload }) {
     }
     for (let i = 0; i < bookRows.length; i += 50) await sb.from('books').upsert(bookRows.slice(i, i + 50))
     for (let i = 0; i < shelfRows.length; i += 50) await sb.from('shelf').upsert(shelfRows.slice(i, i + 50))
+    const { data } = await sb.from('shelf').select('book_key, star')
+    setUserShelf(new Map((data ?? []).map((r) => [r.book_key as string, r.star as number])))
+    reloadOverlay()
+    return shelfRows.length
+  }, [user, payload, reloadOverlay])
+
+  /* ── ブクログID連携: IDだけで本棚を再現・再同期 ─────────
+     星1〜5の本を読了として取り込む（前提:「読んだ本には星を付けている」）。
+     IDはプロフィールに保存し、次回からワンタップで再同期できる。 */
+  const [myBooklogId, setMyBooklogId] = useState<string | null>(null)
+  useEffect(() => {
+    const sb = getSupabase()
+    if (!sb || !user) { setMyBooklogId(null); return }
+    let on = true
+    sb.from('profiles').select('booklog_id').eq('id', user.id).single().then(({ data }) => {
+      if (on) setMyBooklogId((data?.booklog_id as string) ?? null)
+    })
+    return () => { on = false }
+  }, [user])
+
+  const importBooklog = useCallback(async (booklogId: string): Promise<number> => {
+    const sb = getSupabase()
+    if (!sb || !user) return 0
+    const items = await fetchBooklogShelf(booklogId) // 失敗は throw（呼び出し側で表示）
+    const bakedKeys = new Set(payload.n.map((a) => a[11]))
+    const shelfRows: { user_id: string; book_key: string; star: number }[] = []
+    const bookRows: { key: string; isbn: string | null; title: string; author: string; cat: string; created_by: string }[] = []
+    for (const it of items) {
+      const norm = normalizeTitleKey(it.title)
+      const key = bakedKeys.has(norm) ? norm : it.isbn ? `isbn:${it.isbn}` : norm
+      if (!key) continue
+      shelfRows.push({ user_id: user.id, book_key: key, star: it.star })
+      if (!bakedKeys.has(key)) {
+        bookRows.push({ key, isbn: it.isbn || null, title: it.title, author: '', cat: 'lit', created_by: user.id })
+      }
+    }
+    for (let i = 0; i < bookRows.length; i += 50) await sb.from('books').upsert(bookRows.slice(i, i + 50))
+    for (let i = 0; i < shelfRows.length; i += 50) await sb.from('shelf').upsert(shelfRows.slice(i, i + 50))
+    await sb.from('profiles').update({ booklog_id: booklogId }).eq('id', user.id)
+    setMyBooklogId(booklogId)
     const { data } = await sb.from('shelf').select('book_key, star')
     setUserShelf(new Map((data ?? []).map((r) => [r.book_key as string, r.star as number])))
     reloadOverlay()
@@ -772,10 +795,11 @@ export default function Atlas({ payload }: { payload: Payload }) {
             viewingId={viewing?.id ?? null}
             overlaps={overlaps}
             titleOf={(k) => keyTitle.get(k) ?? k.replace(/^isbn:/, '')}
+            booklogId={myBooklogId}
             onToggleFollow={toggleFollow}
             onView={(p) => setViewing(p)}
-            onImportSample={importSampleShelf}
             onImportCsv={importBooklogCsv}
+            onImportBooklog={importBooklog}
           />
           <button
             onClick={() => setControlsOpen((v) => !v)}
