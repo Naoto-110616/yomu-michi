@@ -1,21 +1,27 @@
 /**
  * グラフのドメインモデル。
  *
- * 設計上いちばん重要なのは RelationType が 4 種類あること。
- * 単なる「関連」ではなく、前提 / 発展 / 別視点 / 反論 を区別することが
- * このプロダクトの中身そのものになっている。
+ * 2つの軸で構成が決まる:
+ *   NodeKind     — 概念か、本か。概念は本より上位の存在。
+ *   RelationType — 前提 / 発展 / 別視点 / 反論 / 所属。
+ *
+ * このプロダクトの中身は、単なる「関連」ではなく関係の種類を区別することにある。
  */
 
-export const RELATIONS = ['pre', 'next', 'alt', 'counter'] as const
+export const RELATIONS = ['member', 'pre', 'next', 'alt', 'counter'] as const
 export type RelationType = (typeof RELATIONS)[number]
 
 export const RELATION_META: Record<
   RelationType,
   { label: string; color: string; dashed: boolean; directed: boolean; hint: string }
 > = {
+  member: {
+    label: '所属', color: '#a78bfa', dashed: false, directed: false,
+    hint: 'この概念に属する本',
+  },
   pre: {
     label: '前提', color: '#f59e0b', dashed: false, directed: true,
-    hint: 'これを先に読んでおくと、相手の本が効く',
+    hint: '先に読んでおくと効く',
   },
   next: {
     label: '発展', color: '#60a5fa', dashed: false, directed: true,
@@ -23,7 +29,7 @@ export const RELATION_META: Record<
   },
   alt: {
     label: '別視点', color: '#5b6472', dashed: true, directed: false,
-    hint: '同じテーマを別の角度から扱っている',
+    hint: '同じテーマを別の角度から',
   },
   counter: {
     label: '反論', color: '#ef4444', dashed: true, directed: true,
@@ -54,21 +60,39 @@ export const STAR_COLOR: Record<number, string> = {
   5: '#fbbf24', 4: '#7dd3fc', 3: '#86efac', 2: '#f472b6', 1: '#a78bfa', 0: '#6b7382',
 }
 
+export type NodeKind = 'book' | 'concept'
+
+/**
+ * 表示の階層。既定では 概念 > 読んだ本 > 紐づく本 の順に大きく・濃くなる。
+ * ネットワークのサイズ（何段目まで出すか）もこれで決める。
+ */
+export const TIERS = ['concept', 'shelf', 'linked', 'far'] as const
+export type Tier = (typeof TIERS)[number]
+
+export const TIER_META: Record<Tier, { label: string; scale: number }> = {
+  concept: { label: '概念',     scale: 1.0 },
+  shelf:   { label: '読んだ本', scale: 0.62 },
+  linked:  { label: '紐づく本', scale: 0.38 },
+  far:     { label: 'その他',   scale: 0.26 },
+}
+
 export interface BookNode {
   i: number
+  kind: NodeKind
   title: string
   author: string
+  desc: string
   year: number
   cat: Category
-  /** 所有者の★評価。0 = 未評価、null = 未読（世間の本） */
+  /** 所有者の★評価。0 = 未評価、null = 未読 / 概念 */
   star: number | null
-  /** 所有者の本棚にある本か */
   shelf: boolean
-  /** 出典（賞・ランキング名など） */
   sources: string[]
+  /** 事前計算されたホームポジション */
   x: number
   y: number
   degree: number
+  tier: Tier
 }
 
 export interface Edge {
@@ -78,14 +102,15 @@ export interface Edge {
   why: string
 }
 
-/** pipeline/pack.py が吐く圧縮フォーマット */
 export interface Payload {
   C: string[]
   T: string[]
+  K: string[]
   A: string[]
   S: string[]
   W: string[]
-  n: [string, number, number, number, number, number, number, number, number[]][]
+  D: string[]
+  n: [string, number, number, number, number, number, number, number, number[], number, number][]
   e: [number, number, number, number][]
   meta: { nodes: number; edges: number; shelf: number; byType: Record<string, number>; raw: number }
 }
@@ -93,17 +118,18 @@ export interface Payload {
 export interface Graph {
   nodes: BookNode[]
   edges: Edge[]
-  /** node index -> 接続する edge の index 一覧 */
   adjacency: number[][]
   meta: Payload['meta']
-  bounds: { minX: number; maxX: number; minY: number; maxY: number }
+  concepts: number[]
 }
 
 export function buildGraph(p: Payload): Graph {
   const nodes: BookNode[] = p.n.map((a, i) => ({
     i,
+    kind: (p.K?.[a[9]] as NodeKind) ?? 'book',
     title: a[0],
-    author: p.A[a[1]] ?? '—',
+    author: p.A[a[1]] ?? '',
+    desc: a[10] >= 0 ? (p.D?.[a[10]] ?? '') : '',
     year: a[2],
     cat: (p.C[a[3]] as Category) ?? 'lit',
     star: a[4] < 0 ? null : a[4],
@@ -112,6 +138,7 @@ export function buildGraph(p: Payload): Graph {
     y: a[7],
     sources: (a[8] ?? []).map((j) => p.S[j]).filter(Boolean),
     degree: 0,
+    tier: 'far',
   }))
 
   const edges: Edge[] = p.e.map((e) => ({
@@ -129,36 +156,61 @@ export function buildGraph(p: Payload): Graph {
     nodes[e.to].degree++
   })
 
-  const xs = nodes.map((n) => n.x)
-  const ys = nodes.map((n) => n.y)
+  // ── 階層を決める ────────────────────────
+  // 概念 → 読んだ本 → そのどちらかに1ホップで繋がる本 → それ以外
+  const core = new Set<number>()
+  nodes.forEach((n) => {
+    if (n.kind === 'concept') { n.tier = 'concept'; core.add(n.i) }
+    else if (n.shelf) { n.tier = 'shelf'; core.add(n.i) }
+  })
+  for (const i of core) {
+    for (const ei of adjacency[i]) {
+      const e = edges[ei]
+      for (const j of [e.from, e.to]) {
+        if (!core.has(j) && nodes[j].tier === 'far') nodes[j].tier = 'linked'
+      }
+    }
+  }
+
   return {
     nodes, edges, adjacency, meta: p.meta,
-    bounds: {
-      minX: Math.min(...xs), maxX: Math.max(...xs),
-      minY: Math.min(...ys), maxY: Math.max(...ys),
-    },
+    concepts: nodes.filter((n) => n.kind === 'concept').map((n) => n.i),
   }
 }
 
-/* ── 表示のためのヘルパー ───────────────────────────── */
+/* ── 表示のためのヘルパー ───────────────────── */
 
-export function nodeRadius(n: BookNode): number {
-  if (n.shelf) return n.star ? 3.2 + n.star * 1.15 : 5
-  return 2 + Math.min(n.degree, 8) * 0.38
+/** ネットワークのサイズ = 何段目まで出すか */
+export const DEPTHS: { id: number; label: string; tiers: Tier[] }[] = [
+  { id: 0, label: '概念だけ',   tiers: ['concept'] },
+  { id: 1, label: '+ 読んだ本', tiers: ['concept', 'shelf'] },
+  { id: 2, label: '+ 紐づく本', tiers: ['concept', 'shelf', 'linked'] },
+  { id: 3, label: 'すべて',     tiers: ['concept', 'shelf', 'linked', 'far'] },
+]
+export const DEFAULT_DEPTH = 2
+
+export function nodeRadius(n: BookNode, scale = 1): number {
+  const base =
+    n.kind === 'concept' ? 13 + Math.min(n.degree, 12) * 0.45
+    : n.shelf ? (n.star ? 4 + n.star * 1.4 : 5.5)
+    : 2.4 + Math.min(n.degree, 8) * 0.42
+  return base * scale
 }
 
 export type ViewMode = 'all' | 'shelf' | 'human'
 
 export function nodeColor(n: BookNode, mode: ViewMode): string {
+  if (n.kind === 'concept') return '#a78bfa'
   if (mode === 'shelf' && !n.shelf) return '#232a34'
   if (n.shelf) return n.star !== null ? (STAR_COLOR[n.star] ?? '#6b7382') : '#6b7382'
   return CATEGORY_META[n.cat]?.color ?? '#4b5563'
 }
 
-export function nodeOpacity(n: BookNode, mode: ViewMode): number {
-  if (mode === 'shelf') return n.shelf ? 1 : 0.2
-  if (mode === 'human') return 1
-  return n.shelf ? 1 : 0.62
+export function baseOpacity(n: BookNode, mode: ViewMode): number {
+  if (n.kind === 'concept') return 1
+  if (mode === 'shelf') return n.shelf ? 1 : 0.18
+  if (n.shelf) return 1
+  return n.tier === 'linked' ? 0.62 : 0.42
 }
 
 export function starLabel(star: number | null): string {
@@ -169,6 +221,5 @@ export function starLabel(star: number | null): string {
 
 export function matchesQuery(n: BookNode, q: string): boolean {
   if (!q) return true
-  const hay = (n.title + n.author + n.sources.join('')).toLowerCase()
-  return hay.includes(q.toLowerCase())
+  return (n.title + n.author + n.desc + n.sources.join('')).toLowerCase().includes(q.toLowerCase())
 }
