@@ -230,7 +230,7 @@ function ConceptChips({
   )
 }
 
-/* ── すぐ読み始める（図書館 / 新品 / 中古） ──────────── */
+/* ── すぐ読み始める（図書館 / 新品 / 中古） ──────────────── */
 
 function ReadLinks({ node }: { node: BookNode }) {
   const links = readLinks(node.title, node.author, node.isbn)
