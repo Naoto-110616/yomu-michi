@@ -48,6 +48,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   // ── エッジ ─────────────────────────────
   for (const ei of s.visibleEdges) {
     const e = graph.edges[ei]
+    if (!e) continue // グラフ再構築の瞬間に古いインデックスが混ざっても落とさない
     const meta = RELATION_META[e.type]
     const a = Math.min(fade[e.from], fade[e.to])
     if (a < 0.02) continue

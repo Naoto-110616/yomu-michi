@@ -104,34 +104,58 @@ export default function Atlas({ payload }: { payload: Payload }) {
   filters.current = { mode, edgeTypes, categories, query, selected, hovered, nodeScale }
   const visibleEdges = useRef<number[]>([])
 
+  /* ── 描画ループ ─────────────────────────────
+     graph / sim / boosts はオーバーレイ到着で作り直されるため、ループから
+     直接閉じ込めてはいけない。ref 経由で「その瞬間の最新一式」を読む。
+
+     以前の実装はループが sim をクロージャに抱えており、グラフ再構築後に
+     (1) 古いループが古い sim を回し続けて新しい sim が止まって見える
+     (2) 古い graph と新しい visibleEdges の食い違いで例外 → rAF が宙に浮き
+         kick() が永遠に無視される
+     という二重の停止バグがあった。ref 化 + 例外時リセットの二段でふさぐ。
+     この回帰は tests/e2e/atlas.spec.ts の「オーバーレイ後もドラッグで動く」が守る。 */
+  const live = useRef({ graph, sim, boosts })
+  live.current = { graph, sim, boosts }
+
   const snapshot = useCallback((): RenderState => ({
-    graph, sim, boosts,
+    ...live.current,
     transform: transform.current,
     width: size.current.w,
     height: size.current.h,
     dpr: size.current.dpr,
     visibleEdges: visibleEdges.current,
     ...filters.current,
-  }), [graph, sim, boosts])
+  }), [])
 
-  /* ── 描画ループ。sim が「もう動かない」と言ったら完全に止まる ── */
   const raf = useRef<number | null>(null)
-  const loop = useCallback(() => {
-    const moving = sim.step()
-    const ctx = canvasRef.current?.getContext('2d')
-    const s = snapshot()
-    if (ctx && s.width > 0) render(ctx, s)
-    raf.current = moving ? requestAnimationFrame(loop) : null
-  }, [sim, snapshot])
+  const loopFn = useRef<(() => void) | null>(null)
+  if (loopFn.current === null) {
+    loopFn.current = () => {
+      raf.current = null // 先に外す。ループ内で例外が起きても次の kick が効く
+      try {
+        const s = snapshot()
+        const moving = s.sim.step()
+        const ctx = canvasRef.current?.getContext('2d')
+        if (ctx && s.width > 0) render(ctx, s)
+        if (moving && raf.current === null) raf.current = requestAnimationFrame(loopFn.current!)
+      } catch (err) {
+        console.error('[atlas] render loop error', err)
+      }
+    }
+  }
 
   const kick = useCallback(() => {
-    if (raf.current === null) raf.current = requestAnimationFrame(loop)
-  }, [loop])
+    if (raf.current === null) raf.current = requestAnimationFrame(loopFn.current!)
+  }, [])
 
   const paintOnce = useCallback(() => {
-    const ctx = canvasRef.current?.getContext('2d')
-    const s = snapshot()
-    if (ctx && s.width > 0) render(ctx, s)
+    try {
+      const s = snapshot()
+      const ctx = canvasRef.current?.getContext('2d')
+      if (ctx && s.width > 0) render(ctx, s)
+    } catch (err) {
+      console.error('[atlas] paint error', err)
+    }
   }, [snapshot])
 
   /* ── サイズ追従（絞り込みパネル開閉に ResizeObserver で追従） ── */
@@ -292,7 +316,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
           k: transform.current.k,
           w: toWorld(transform.current, (a.x + b.x) / 2, (a.y + b.y) / 2),
         }
-        if (dragging) { sim.endDrag(); dragging = false }
+        if (dragging) { live.current.sim.endDrag(); dragging = false }
         pending = null
         panning = false
         return
@@ -333,12 +357,12 @@ export default function Atlas({ payload }: { payload: Payload }) {
 
       if (pending !== null && moved && !dragging) {
         dragging = true
-        sim.startDrag(pending)
+        live.current.sim.startDrag(pending)
         kick()
       }
       if (dragging) {
         const w = toWorld(transform.current, e.offsetX, e.offsetY)
-        sim.moveDrag(w.x, w.y)
+        live.current.sim.moveDrag(w.x, w.y)
         kick()
       } else if (panning && moved) {
         transform.current = {
@@ -355,7 +379,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
       const tappedEmpty = !moved && pending === null
       ptrs.delete(e.pointerId)
       if (ptrs.size < 2) pinch = null
-      if (dragging) { sim.endDrag(); dragging = false; kick() }
+      if (dragging) { live.current.sim.endDrag(); dragging = false; kick() }
       pending = null
       panning = false
       if (tappedNode !== null) select(tappedNode)
@@ -364,7 +388,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
 
     const cancel = (e: PointerEvent) => {
       ptrs.delete(e.pointerId)
-      if (dragging) { sim.endDrag(); dragging = false }
+      if (dragging) { live.current.sim.endDrag(); dragging = false }
       pending = null
       panning = false
       pinch = null
@@ -394,7 +418,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
       cv.removeEventListener('pointerleave', leave)
       cv.removeEventListener('wheel', wheel)
     }
-  }, [sim, snapshot, select, kick, paintOnce])
+  }, [snapshot, select, kick, paintOnce])
 
   /* ── 初期表示 ───────────────────────────── */
   const didFit = useRef(false)
