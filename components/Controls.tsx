@@ -4,6 +4,8 @@ import {
   CATEGORIES, CATEGORY_META, DEPTHS, RELATIONS, RELATION_META,
   type BookNode, type Category, type RelationType, type ViewMode,
 } from '@/lib/graph'
+import type { NdlItem } from '@/lib/overlay'
+import WorldSearch from './WorldSearch'
 
 const MODES: { id: ViewMode; label: string }[] = [
   { id: 'all', label: '全体' },
@@ -46,6 +48,11 @@ export default function Controls(props: {
   onQuery: (q: string) => void
   concepts: BookNode[]
   onPickConcept: (i: number) => void
+  worldSearch: {
+    loggedIn: boolean
+    knownKeys: Set<string>
+    onMaterialize: (item: NdlItem) => Promise<void>
+  }
 }) {
   return (
     <div
@@ -53,6 +60,12 @@ export default function Controls(props: {
         props.open ? 'max-h-[min(58vh,460px)] px-3.5 pb-3.5 pt-3' : 'max-h-0 overflow-hidden px-3.5 py-0'
       }`}
     >
+      {/* 世界の本を探す */}
+      <p className="mb-1.5 text-[10px] tracking-[0.09em] text-dim">世界の本を探す</p>
+      <div className="mb-3">
+        <WorldSearch {...props.worldSearch} />
+      </div>
+
       {/* ネットワークのサイズ */}
       <p className="mb-1.5 text-[10px] tracking-[0.09em] text-dim">ネットワークのサイズ</p>
       <div className="mb-1 flex gap-1.5">
