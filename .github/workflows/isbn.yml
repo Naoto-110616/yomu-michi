@@ -6,7 +6,9 @@ on:
     - cron: '0 18 * * 0'   # 毎週日曜 18:00 UTC に少しずつ埋める（自己修復）
   push:
     branches: [main]
-    paths: ['pipeline/isbn_backfill.py']
+    paths:
+      - 'pipeline/isbn_backfill.py'
+      - '.github/workflows/isbn.yml'
 
 permissions:
   contents: write
@@ -39,5 +41,8 @@ jobs:
           if ! git diff --cached --quiet; then
             n=$(python3 -c "import json;print(len(json.load(open('pipeline/isbn_map.json'))))" 2>/dev/null || echo '?')
             git commit -m "ISBNを補完（累計 ${n} 件 → 全書影・図書館直リンクが有効に）"
+            # 実行中（数十分）に main が進んでいても成果を失わない。
+            # 初回実行はデプロイのURL記録コミットと競合して push が弾かれ、1時間分が消えた
+            git pull --rebase origin main
             git push
           fi
