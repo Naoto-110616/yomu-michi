@@ -31,12 +31,14 @@ function RelList({ items, nodes, onSelect }: { items: Rel[]; nodes: BookNode[]; 
 }
 
 export default function DetailPanel({
-  node, nodes, incoming, outgoing, onSelect, onClose,
+  node, nodes, incoming, outgoing, canRate, onRate, onSelect, onClose,
 }: {
   node: BookNode
   nodes: BookNode[]
   incoming: Rel[]
   outgoing: Rel[]
+  canRate: boolean
+  onRate: (key: string, star: number | null) => void
   onSelect: (i: number) => void
   onClose: () => void
 }) {
@@ -67,6 +69,27 @@ export default function DetailPanel({
             {starLabel(node.star)}
             {node.star === null && <span className="text-[11px] tracking-normal"> — 世間の本</span>}
           </p>
+          {canRate && (
+            <div className="mb-2 flex items-center gap-1">
+              {[1, 2, 3, 4, 5].map((s) => (
+                <button
+                  key={s}
+                  onClick={() => onRate(node.key, node.star === s ? null : s)}
+                  className="px-0.5 text-[17px] leading-none transition-transform active:scale-125"
+                  style={{ color: node.star !== null && node.star >= s ? '#fbbf24' : '#3a4150' }}
+                  aria-label={`星${s}`}
+                >
+                  ★
+                </button>
+              ))}
+              <button
+                onClick={() => onRate(node.key, node.star === null ? 0 : null)}
+                className="ml-1.5 rounded-full border border-line px-2 py-0.5 text-[10.5px] text-muted active:text-text"
+              >
+                {node.star === null ? '読んだことにする' : '本棚から外す'}
+              </button>
+            </div>
+          )}
         </>
       )}
       {!isConcept && <p className="m-0 mb-1.5 text-[11.5px] text-muted">{CATEGORY_META[node.cat].label}</p>}

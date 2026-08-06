@@ -31,7 +31,8 @@ const BG = '#0b0d11'
 
 export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   const { graph, sim, transform: T, width: W, height: H, dpr } = s
-  const { x, y, alpha } = sim
+  const P = sim.all
+  const fade = sim.fade
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, W, H)
@@ -46,7 +47,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   for (const ei of s.visibleEdges) {
     const e = graph.edges[ei]
     const meta = RELATION_META[e.type]
-    const a = Math.min(alpha[e.from], alpha[e.to])
+    const a = Math.min(fade[e.from], fade[e.to])
     if (a < 0.02) continue
 
     const strong = e.type !== 'alt'
@@ -55,20 +56,20 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     ctx.lineWidth = (e.type === 'alt' ? 0.8 : e.type === 'member' ? 1.1 : 1.7) / k
     ctx.setLineDash(meta.dashed ? [3 / k, 3.5 / k] : [])
     ctx.beginPath()
-    ctx.moveTo(x[e.from], y[e.from])
-    ctx.lineTo(x[e.to], y[e.to])
+    ctx.moveTo(P[e.from].x, P[e.from].y)
+    ctx.lineTo(P[e.to].x, P[e.to].y)
     ctx.stroke()
     ctx.setLineDash([])
 
     if (meta.directed && !meta.dashed && strong && a > 0.5) {
-      const dx = x[e.to] - x[e.from]
-      const dy = y[e.to] - y[e.from]
+      const dx = P[e.to].x - P[e.from].x
+      const dy = P[e.to].y - P[e.from].y
       const d = Math.hypot(dx, dy) || 1
       const ux = dx / d
       const uy = dy / d
       const tip = nodeRadius(graph.nodes[e.to], s.nodeScale) + 2.5
-      const ax = x[e.to] - ux * tip
-      const ay = y[e.to] - uy * tip
+      const ax = P[e.to].x - ux * tip
+      const ay = P[e.to].y - uy * tip
       const sz = 5.5 / k
       ctx.fillStyle = meta.color
       ctx.beginPath()
@@ -83,26 +84,26 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   // ── ノード ─────────────────────────────
   for (const i of sim.activeList) {
     const n = graph.nodes[i]
-    const a = alpha[i]
+    const a = fade[i]
     if (a < 0.02) continue
     const r = nodeRadius(n, s.nodeScale)
     ctx.globalAlpha = a
 
     if (n.kind === 'concept') {
       // 概念はうっすら光らせて、本より上位であることを見せる
-      const g = ctx.createRadialGradient(x[i], y[i], r * 0.3, x[i], y[i], r * 2.4)
+      const g = ctx.createRadialGradient(P[i].x, P[i].y, r * 0.3, P[i].x, P[i].y, r * 2.4)
       g.addColorStop(0, 'rgba(167,139,250,.30)')
       g.addColorStop(1, 'rgba(167,139,250,0)')
       ctx.globalAlpha = a * 0.9
       ctx.fillStyle = g
       ctx.beginPath()
-      ctx.arc(x[i], y[i], r * 2.4, 0, Math.PI * 2)
+      ctx.arc(P[i].x, P[i].y, r * 2.4, 0, Math.PI * 2)
       ctx.fill()
       ctx.globalAlpha = a
     }
 
     ctx.beginPath()
-    ctx.arc(x[i], y[i], r, 0, Math.PI * 2)
+    ctx.arc(P[i].x, P[i].y, r, 0, Math.PI * 2)
     ctx.fillStyle = nodeColor(n, s.mode)
     ctx.fill()
 
@@ -119,7 +120,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     if (i === focus) {
       ctx.globalAlpha = 1
       ctx.beginPath()
-      ctx.arc(x[i], y[i], r + 6 / k, 0, Math.PI * 2)
+      ctx.arc(P[i].x, P[i].y, r + 6 / k, 0, Math.PI * 2)
       ctx.strokeStyle = '#fff'
       ctx.lineWidth = 1.5 / k
       ctx.stroke()
@@ -144,7 +145,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   const cand = sim.activeList
     .filter((i) => {
       const n = graph.nodes[i]
-      if (alpha[i] < 0.35) return false
+      if (fade[i] < 0.35) return false
       return n.kind === 'concept' || n.shelf || T.k > 0.5 || n.degree >= 6 || i === focus
     })
     .sort((a, b) => priority(a) - priority(b))
@@ -162,14 +163,14 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     const text = n.title.length > 16 ? n.title.slice(0, 15) + '…' : n.title
     const w = ctx.measureText(text).width
     const h = fs * 1.25
-    const yy = y[i] - nodeRadius(n, s.nodeScale) - 4 / T.k
-    if (!free(x[i] - w / 2 - 1, yy - h, x[i] + w / 2 + 1, yy + 2)) continue
-    ctx.globalAlpha = alpha[i]
+    const yy = P[i].y - nodeRadius(n, s.nodeScale) - 4 / T.k
+    if (!free(P[i].x - w / 2 - 1, yy - h, P[i].x + w / 2 + 1, yy + 2)) continue
+    ctx.globalAlpha = fade[i]
     ctx.lineWidth = 3.4 / Math.max(T.k, 0.5)
     ctx.strokeStyle = BG
-    ctx.strokeText(text, x[i], yy)
+    ctx.strokeText(text, P[i].x, yy)
     ctx.fillStyle = isConcept ? '#e9d5ff' : i === focus ? '#fff' : n.shelf ? '#eef1f5' : '#98a1af'
-    ctx.fillText(text, x[i], yy)
+    ctx.fillText(text, P[i].x, yy)
   }
 
   ctx.restore()
@@ -185,12 +186,13 @@ export const toWorld = (T: Transform, sx: number, sy: number) => ({
 
 export function hitTest(s: RenderState, sx: number, sy: number): number | null {
   const w = toWorld(s.transform, sx, sy)
-  const { x, y, alpha } = s.sim
+  const P = s.sim.all
+  const fade = s.sim.fade
   let best: number | null = null
   let bestD = Infinity
   for (const i of s.sim.activeList) {
-    if (alpha[i] < 0.25) continue
-    const d = Math.hypot(x[i] - w.x, y[i] - w.y)
+    if (fade[i] < 0.25) continue
+    const d = Math.hypot(P[i].x - w.x, P[i].y - w.y)
     const reach = Math.max(nodeRadius(s.graph.nodes[i], s.nodeScale) + 8 / s.transform.k, 14 / s.transform.k)
     if (d < reach && d < bestD) { bestD = d; best = i }
   }
@@ -204,11 +206,11 @@ export function fitTransform(
 ): Transform {
   const list = [...ids]
   if (!list.length) return s.transform
-  const { x, y } = s.sim
+  const P = s.sim.all
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
   for (const i of list) {
-    minX = Math.min(minX, x[i]); maxX = Math.max(maxX, x[i])
-    minY = Math.min(minY, y[i]); maxY = Math.max(maxY, y[i])
+    minX = Math.min(minX, P[i].x); maxX = Math.max(maxX, P[i].x)
+    minY = Math.min(minY, P[i].y); maxY = Math.max(maxY, P[i].y)
   }
   const vw = opts.panelSide === 'right' ? Math.max(200, s.width - opts.panelSize) : s.width
   const vh = opts.panelSide === 'bottom' ? Math.max(160, s.height - opts.panelSize) : s.height
