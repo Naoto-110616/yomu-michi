@@ -94,6 +94,65 @@ describe('buildGraph: オーバーレイ（動的ノード + 紐付けの重み�
   })
 })
 
+describe('buildGraph: AI推論ループの提案（未検証エッジ）', () => {
+  const base = { books: [], concepts: [], links: [], bonds: [] }
+
+  it('proposed / disputed だけが status 付きの破線エッジになる', () => {
+    const g = buildGraph(tinyPayload(), null, {
+      ...base,
+      proposals: [
+        { id: 'p1', kind: 'pre' as const, from: 'book_b', to: 'book_d', why: '理由', confidence: 0.8, status: 'proposed' },
+        { id: 'p2', kind: 'counter' as const, from: 'book_c', to: 'book_d', why: '理由', confidence: 0.5, status: 'disputed' },
+        { id: 'p3', kind: 'alt' as const, from: 'book_a', to: 'book_d', why: '理由', confidence: 0.9, status: 'rejected' },
+        { id: 'p4', kind: 'alt' as const, from: 'book_b', to: 'book_c', why: '理由', confidence: 0.9, status: 'verified' },
+      ],
+    })
+    const props = g.edges.filter((e) => e.status)
+    expect(props).toHaveLength(2) // rejected / verified は描かない
+    const pre = props.find((e) => e.type === 'pre')
+    expect(pre?.status).toBe('proposed')
+    expect(g.nodes[pre!.from].key).toBe('book_b') // pre は from が前提側
+    expect(g.nodes[pre!.to].key).toBe('book_d')
+    expect(pre?.why).toContain('AIの提案')
+    expect(pre?.why).toContain('80%')
+    expect(props.find((e) => e.type === 'counter')?.status).toBe('disputed')
+  })
+
+  it('member 提案は概念→本の所属エッジになる', () => {
+    const g = buildGraph(tinyPayload(), null, {
+      ...base,
+      proposals: [
+        { id: 'p1', kind: 'member' as const, from: 'c_test', to: 'book_d', why: '理由', confidence: 0.6, status: 'proposed' },
+      ],
+    })
+    const e = g.edges.find((x) => x.status === 'proposed')
+    expect(e?.type).toBe('member')
+    expect(g.nodes[e!.from].kind).toBe('concept')
+    expect(g.nodes[e!.to].key).toBe('book_d')
+  })
+
+  it('同種の実エッジが既にある提案は重複して張らない', () => {
+    const g = buildGraph(tinyPayload(), null, {
+      ...base,
+      proposals: [
+        // 焼き込みに 読了本A →(pre) 読了本B が既にある
+        { id: 'p1', kind: 'pre' as const, from: 'book_a', to: 'book_b', why: '重複', confidence: 0.9, status: 'proposed' },
+      ],
+    })
+    expect(g.edges.filter((e) => e.status)).toHaveLength(0)
+  })
+
+  it('グラフに無いキーへの提案は黙って捨てる', () => {
+    const g = buildGraph(tinyPayload(), null, {
+      ...base,
+      proposals: [
+        { id: 'p1', kind: 'alt' as const, from: '実在しない本', to: 'book_a', why: 'x', confidence: 0.9, status: 'proposed' },
+      ],
+    })
+    expect(g.edges.filter((e) => e.status)).toHaveLength(0)
+  })
+})
+
 describe('nodeRadius: 紐付け人数でノードが育つ', () => {
   it('boost に対して単調に増える', () => {
     const g = buildGraph(tinyPayload())
