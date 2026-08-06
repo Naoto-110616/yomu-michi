@@ -46,7 +46,11 @@ test.afterAll(async () => {
 /* ── モックとヘルパー ─────────────────────────── */
 
 /** 本番と同じ「オーバーレイ到着 → グラフ再構築」を必ず起こす */
-async function mockSupabase(page: Page) {
+async function mockSupabase(page: Page, opts: { landing?: boolean } = {}) {
+  // LP は専用テスト以外では出さない（各テストは地図そのものを見たい）
+  if (!opts.landing) {
+    await page.addInitScript(() => sessionStorage.setItem('yomu:lp-seen', '1'))
+  }
   // 未指定のエンドポイントは空配列（Playwright は後に登録した route が優先）
   await page.route('**/*.supabase.co/rest/v1/**', (r) => r.fulfill({ json: [] }))
   await page.route('**/*.supabase.co/rest/v1/concept_link_strength**', (r) =>
@@ -188,6 +192,27 @@ test('AI推論ループ: 提案が検証カードに出て、未ログインで�
   await expect(page.getByText('85%')).toBeVisible()
   await expect(page.getByText('ログインすると判定できます')).toBeVisible()
   await expect(page.getByText('まだ判定がありません')).toBeVisible()
+  expect(errs).toEqual([])
+})
+
+test('LP: 未ログインの初回訪問はサービス概要から入り、CTAで地図に降りる', async ({ page }) => {
+  const errs = collectErrors(page)
+  await mockSupabase(page, { landing: true })
+  await page.goto(baseURL, { waitUntil: 'domcontentloaded' })
+
+  await expect(page.getByRole('heading', { name: /知識の地図になる/ })).toBeVisible()
+  await expect(page.getByText('AIが線を張り、あなたは1タップ')).toBeVisible()
+  await expect(page.getByText('はじめかた')).toBeVisible()
+
+  // CTA で LP が閉じ、後ろで動いていた実物の地図がそのまま前面になる
+  await page.getByRole('button', { name: /地図をさわってみる — ログイン不要/ }).click()
+  await expect(page.getByText('はじめかた')).toBeHidden()
+  await expect(page.locator('canvas')).toBeVisible()
+
+  // 同じタブ内のリロードでは再表示しない
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(800)
+  await expect(page.getByText('はじめかた')).toBeHidden()
   expect(errs).toEqual([])
 })
 
