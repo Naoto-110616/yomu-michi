@@ -13,6 +13,8 @@ TYPES = ['alt','next','pre','counter','member']
 KINDS = ['book','concept']
 
 d = json.load(open(os.path.join(HERE, 'graph.raw.json')))
+ISBN_MAP_PATH = os.path.join(HERE, 'isbn_map.json')
+ISBN_MAP = json.load(open(ISBN_MAP_PATH)) if os.path.exists(ISBN_MAP_PATH) else {}
 N, E = d['nodes'], d['edges']
 idx = {n['k']: i for i, n in enumerate(N)}
 
@@ -30,7 +32,8 @@ nodes = [[n['t'], intern('A', n['a']), n['y'],
           [intern('S', x) for x in n['src'][:2]],
           KINDS.index(n.get('kind', 'book')),
           intern('D', n.get('desc', '')) if n.get('desc') else -1,
-          n['k']] for n in N]
+          n['k'],
+          ISBN_MAP.get(n['k'], '')] for n in N]
 edges = [[idx[e['s']], idx[e['t']], TYPES.index(e['type']), intern('W', e['why'])] for e in E]
 
 payload = {'C': CATS, 'T': TYPES, 'K': KINDS,
