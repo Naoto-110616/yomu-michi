@@ -124,8 +124,8 @@ export default function Atlas({ payload }: { payload: Payload }) {
       add(l.book, v)
     }
     for (const b of effectiveOverlay.bonds) {
-      add(b.a, b.strength)
-      add(b.b, b.strength)
+      add(b.from, b.strength)
+      add(b.to, b.strength)
     }
     return m
   }, [graph, effectiveOverlay])
@@ -244,12 +244,28 @@ export default function Atlas({ payload }: { payload: Payload }) {
   useEffect(() => {
     const tiers = new Set(DEPTHS[depth].tiers)
     const nodeIds = new Set<number>()
+    // 概念は「自分の棚の本に紐付いているもの」だけを既定で出す。
+    // それ以外の概念は絞り込みのチップから選んだとき（selected 経由）だけ現れる。
+    const activeConcepts = new Set<number>()
+    for (const n of graph.nodes) {
+      if (n.kind !== 'concept') continue
+      for (const ei of graph.adjacency[n.i]) {
+        const e = graph.edges[ei]
+        if (e.type !== 'member') continue
+        const other = graph.nodes[e.from === n.i ? e.to : e.from]
+        if (other.shelf) { activeConcepts.add(n.i); break }
+      }
+    }
     graph.nodes.forEach((n) => {
-      // 動的ノード（実体化した本・ユーザー概念）は絞り込みに関係なく出す
+      if (n.kind === 'concept') {
+        if (activeConcepts.has(n.i)) nodeIds.add(n.i)
+        return
+      }
+      // 動的ノード（実体化した本・アカウントの島）は絞り込みに関係なく出す
       if (n.dynamic) { nodeIds.add(n.i); return }
       if (!tiers.has(n.tier)) return
       if (!categories.has(n.cat)) return
-      if (mode === 'shelf' && n.kind !== 'concept' && !n.shelf) return
+      if (mode === 'shelf' && !n.shelf) return
       nodeIds.add(n.i)
     })
     // 選択中のノードとその隣接は、サイズ設定に関係なく必ず出す
@@ -519,15 +535,26 @@ export default function Atlas({ payload }: { payload: Payload }) {
     reloadOverlay()
   }, [user, reloadOverlay])
 
-  /* ── 本と本の結びつき（無向・辞書順に正規化） ── */
-  const setBond = useCallback(async (bookKey: string, otherKey: string, strength: number | null) => {
+  /* ── 本と本の紐付け（関係タイプつき）──
+     pre     = 相手が「この本の前提」（相手 → この本）
+     next    = 「この本の続き・発展」（この本 → 相手）
+     alt     = 似ている（無向・辞書順に正規化）
+     counter = 反論（この本 → 相手） */
+  const setBond = useCallback(async (
+    bookKey: string, otherKey: string,
+    rel: 'pre' | 'next' | 'alt' | 'counter', strength: number | null
+  ) => {
     const sb = getSupabase()
     if (!sb || !user) return
-    const [a, b] = bondPair(bookKey, otherKey)
+    let from = bookKey
+    let to = otherKey
+    if (rel === 'pre') { from = otherKey; to = bookKey }
+    if (rel === 'alt') [from, to] = bondPair(bookKey, otherKey)
     if (strength === null) {
-      await sb.from('book_links').delete().eq('a_key', a).eq('b_key', b).eq('user_id', user.id)
+      await sb.from('book_links').delete()
+        .eq('from_key', from).eq('to_key', to).eq('rel', rel).eq('user_id', user.id)
     } else {
-      await sb.from('book_links').upsert({ a_key: a, b_key: b, user_id: user.id, strength })
+      await sb.from('book_links').upsert({ from_key: from, to_key: to, rel, user_id: user.id, strength })
     }
     reloadOverlay()
   }, [user, reloadOverlay])
@@ -704,17 +731,20 @@ export default function Atlas({ payload }: { payload: Payload }) {
               }))
               .sort((a, b) => b.strength - a.strength)}
             bonds={overlay.bonds
-              .filter((l) => l.a === graph.nodes[selected].key || l.b === graph.nodes[selected].key)
+              .filter((l) => l.from === graph.nodes[selected].key || l.to === graph.nodes[selected].key)
               .map((l) => {
-                const otherKey = l.a === graph.nodes[selected].key ? l.b : l.a
+                const isFrom = l.from === graph.nodes[selected].key
+                const otherKey = isFrom ? l.to : l.from
                 const other = graph.nodes.find((n) => n.key === otherKey)
                 return {
                   otherKey,
                   otherIndex: other?.i ?? -1,
                   label: other?.title ?? otherKey,
+                  rel: l.rel,
+                  isFrom,
                   supporters: l.supporters,
                   strength: l.strength,
-                  mine: overlay.mine.get(`${l.a}::${l.b}`) ?? null,
+                  mine: overlay.mine.get(`${l.from}::${l.to}::${l.rel}`) ?? null,
                 }
               })
               .filter((b) => b.otherIndex >= 0)
