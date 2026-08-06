@@ -11,3 +11,7 @@ package-lock.json
 # 派生物。pipeline/sources から npm run data で生成する
 data/graph.json
 pipeline/graph.raw.json
+
+# テスト成果物
+test-results/
+playwright-report/
