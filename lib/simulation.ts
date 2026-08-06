@@ -128,10 +128,14 @@ export class Simulation {
     }
     this.activeList = [...nodeIds]
     const subset = this.activeList.map((i) => this.all[i])
-    const links: SimLink[] = edgeIds.map((ei) => {
-      const e = graph.edges[ei]
-      return { source: e.from, target: e.to, type: e.type }
-    })
+    // AIの未検証エッジ（status あり）は視覚のみ。バネにすると未確定の情報が
+    // レイアウトを歪めるので、判定されて実エッジになるまで物理には載せない
+    const links: SimLink[] = edgeIds
+      .filter((ei) => !graph.edges[ei].status)
+      .map((ei) => {
+        const e = graph.edges[ei]
+        return { source: e.from, target: e.to, type: e.type }
+      })
     this.sim.nodes(subset)
     this.linkForce.links(links as never)
     // 入れ替え直後だけ温めて、新しい配置に馴染ませる
