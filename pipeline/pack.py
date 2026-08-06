@@ -29,7 +29,8 @@ nodes = [[n['t'], intern('A', n['a']), n['y'],
           round(n['px']), round(n['py']),
           [intern('S', x) for x in n['src'][:2]],
           KINDS.index(n.get('kind', 'book')),
-          intern('D', n.get('desc', '')) if n.get('desc') else -1] for n in N]
+          intern('D', n.get('desc', '')) if n.get('desc') else -1,
+          n['k']] for n in N]
 edges = [[idx[e['s']], idx[e['t']], TYPES.index(e['type']), intern('W', e['why'])] for e in E]
 
 payload = {'C': CATS, 'T': TYPES, 'K': KINDS,
