@@ -11,7 +11,6 @@ const MODES: { id: ViewMode; label: string }[] = [
   { id: 'all', label: '全体' },
   { id: 'shelf', label: '読んだ本' },
   { id: 'human', label: '人が張った線' },
-  { id: 'social', label: 'フォローの地図' },
 ]
 
 function Chip({ on, onClick, swatch, label, count }: {

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  CATEGORIES, DEFAULT_DEPTH, DEPTHS, RELATIONS, baseOpacity, buildGraph, buildSocialGraph, matchesQuery, nodeRadius,
+  CATEGORIES, DEFAULT_DEPTH, DEPTHS, RELATIONS, baseOpacity, attachFollowIslands, buildGraph, matchesQuery, nodeRadius,
   type Category, type Payload, type RelationType, type ShelfOverride, type ViewMode,
 } from '@/lib/graph'
 import { Simulation } from '@/lib/simulation'
@@ -83,11 +83,13 @@ export default function Atlas({ payload }: { payload: Payload }) {
   const [mode, setMode] = useState<ViewMode>('all')
   const [social, setSocial] = useState<Awaited<ReturnType<typeof fetchSocial>>>(null)
   useEffect(() => {
-    if (mode !== 'social' || !user) { setSocial(null); return }
+    if (!user) { setSocial(null); return }
     let on = true
     fetchSocial(user).then((d) => { if (on) setSocial(d) }).catch(() => {})
     return () => { on = false }
-  }, [mode, user])
+    // overlay 更新（フォロー操作後）にも追従する
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, overlay])
 
   // 本のタイトル解決（焼き込み + 実体化した本）
   const titleIndex = useMemo(() => {
@@ -98,12 +100,14 @@ export default function Atlas({ payload }: { payload: Payload }) {
   }, [payload, overlay.books])
 
   const graph = useMemo(() => {
-    if (mode === 'social' && social) {
-      return buildSocialGraph({ ...social, titles: titleIndex })
+    const g = buildGraph(payload, shelfOverride, effectiveOverlay)
+    // ログイン中は自分の図の周縁にフォローの島を常設する（他人の地図の閲覧中は除く）
+    if (user && social && !viewing) {
+      return attachFollowIslands(g, { ...social, titles: titleIndex })
     }
-    return buildGraph(payload, shelfOverride, effectiveOverlay)
+    return g
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payload, user?.id, userShelf, effectiveOverlay, viewing?.id, personal, mode, social, titleIndex])
+  }, [payload, user?.id, userShelf, effectiveOverlay, viewing?.id, personal, social, titleIndex])
 
   // ノードごとの紐付け人数（大きさに反映）
   const boosts = useMemo(() => {
@@ -728,8 +732,8 @@ export default function Atlas({ payload }: { payload: Payload }) {
             onSetBond={setBond}
             onCreateConcept={createConcept}
             onViewAccount={(id, username) => {
+              if (user && id === user.id) return // 自分の島は自分
               setSelected(null)
-              setMode('all')
               setViewing({ id, username })
             }}
           />
