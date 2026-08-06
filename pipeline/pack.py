@@ -9,7 +9,8 @@ import json, os
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(os.path.dirname(HERE), 'data', 'graph.json')
 CATS = ['hist','phil','mys','hor','sf','lit','mind','design','comedy','work','sci']
-TYPES = ['alt','next','pre','counter']
+TYPES = ['alt','next','pre','counter','member']
+KINDS = ['book','concept']
 
 d = json.load(open(os.path.join(HERE, 'graph.raw.json')))
 N, E = d['nodes'], d['edges']
@@ -26,11 +27,14 @@ nodes = [[n['t'], intern('A', n['a']), n['y'],
           CATS.index(n['cat']) if n['cat'] in CATS else 0,
           -1 if n['s'] is None else n['s'], n['shelf'],
           round(n['px']), round(n['py']),
-          [intern('S', x) for x in n['src'][:2]]] for n in N]
+          [intern('S', x) for x in n['src'][:2]],
+          KINDS.index(n.get('kind', 'book')),
+          intern('D', n.get('desc', '')) if n.get('desc') else -1] for n in N]
 edges = [[idx[e['s']], idx[e['t']], TYPES.index(e['type']), intern('W', e['why'])] for e in E]
 
-payload = {'C': CATS, 'T': TYPES,
+payload = {'C': CATS, 'T': TYPES, 'K': KINDS,
            'A': tables['A'][0], 'S': tables['S'][0], 'W': tables['W'][0],
+           'D': tables.get('D', ([], {}))[0],
            'n': nodes, 'e': edges, 'meta': d['meta']}
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 with open(OUT, 'w') as f:

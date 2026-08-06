@@ -13,6 +13,7 @@ import json, re, glob, os, math, random
 from collections import defaultdict
 import numpy as np
 from shelf import SHELF
+from concepts import CONCEPTS
 
 random.seed(42); np.random.seed(42)
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -79,13 +80,26 @@ def add(t, a, y, src, cat, star=None, shelf=False):
         if y and not n['y']: n['y'] = y
         return n
     books[k] = {'k':k,'t':t,'a':a or '—','y':y or 0,'src':[src] if src else [],
-                'cat':cat,'s':star,'shelf':shelf}
+                'cat':cat,'s':star,'shelf':shelf,'kind':'book','desc':''}
     return books[k]
 
 for t, a, s, cat in SHELF:
     add(t, a, 0, '', cat, star=s, shelf=True)
 
 EXTRA = [
+ ("イニシエーション・ラブ","乾くるみ",2004,"叙述トリックの代表作","mys"),
+ ("ハサミ男","殊能将之",1999,"叙述トリックの代表作","mys"),
+ ("白夜行","東野圭吾",1999,"日本ミステリの定番","mys"),
+ ("悪意","東野圭吾",1996,"日本ミステリの定番","mys"),
+ ("虚無への供物","中井英夫",1964,"日本ミステリの古典","mys"),
+ ("ドグラ・マグラ","夢野久作",1935,"日本ミステリの古典","mys"),
+ ("孤島パズル","有栖川有栖",1989,"新本格の代表作","mys"),
+ ("出版禁止","長江俊和",2014,"モキュメンタリーホラーの主要作","hor"),
+ ("火のないところに煙は","芦沢央",2018,"モキュメンタリーホラーの主要作","hor"),
+ ("侍女の物語","マーガレット・アトウッド",1985,"世界文学の古典的必読書","sf"),
+ ("ツナグ","辻村深月",2010,"本屋大賞ノミネート","lit"),
+ ("西の魔女が死んだ","梨木香歩",1994,"日本文芸の定番","lit"),
+ ("正欲","朝井リョウ",2021,"日本文芸の定番","lit"),
  ("若い読者のための第三のチンパンジー","ジャレド・ダイアモンド",1992,"世界的科学ノンフィクションの定番","sci"),
  ("砂糖の世界史","川北稔",1996,"世界史の定番","hist"),
  ("エピクロスの処方箋","夏川草介",2025,"本屋大賞2026ノミネート","lit"),
@@ -117,10 +131,22 @@ for f in sorted(glob.glob(os.path.join(SRC_DIR, '*.json'))):
         raw += 1
         add(r['t'], r.get('a',''), r.get('y',0), r.get('src',''), r.get('cat','lit'))
 
+print(f'raw entries : {raw}')
+print(f'unique nodes: {len(books)}  (うち本棚 {sum(1 for n in books.values() if n["shelf"])})')
+
+# ══════════ 2.5 概念ノード ══════════
+# 概念は本より上位のノード。本と同じグラフに住まわせる。
+CONCEPT_NODES = []
+for c in CONCEPTS:
+    n = {'k': c['id'], 't': c['label'], 'a': '', 'y': 0, 'src': [],
+         'cat': c['cat'], 's': None, 'shelf': False,
+         'kind': 'concept', 'desc': c['desc'], 'members': c['members']}
+    books[c['id']] = n
+    CONCEPT_NODES.append(n)
+
 NODES = list(books.values())
 by_key = {n['k']: n for n in NODES}
-print(f'raw entries : {raw}')
-print(f'unique nodes: {len(NODES)}  (うち本棚 {sum(1 for n in NODES if n["shelf"])})')
+print(f'concepts    : {len(CONCEPT_NODES)}')
 
 # ══════════ 3. エッジ生成 ══════════
 E = {}
@@ -129,7 +155,7 @@ def link(a, b, typ, why):
     p = tuple(sorted([a['k'], b['k']])) if typ == 'alt' else (a['k'], b['k'])
     if (p[0],p[1],typ) in E or (p[1],p[0],typ) in E: return False
     # 同じペアに複数種類が付くのは pre/counter を優先し alt は捨てる
-    for t2 in ('pre','next','counter','alt'):
+    for t2 in ('member','pre','next','counter','alt'):
         if t2 != typ and ((p[0],p[1],t2) in E or (p[1],p[0],t2) in E):
             if typ == 'alt': return False
     E[(p[0],p[1],typ)] = why
@@ -137,12 +163,24 @@ def link(a, b, typ, why):
 
 stat = defaultdict(int)
 
+# --- (0) 概念 → 本（所属）------------------------------------------------
+missing = []
+for c in CONCEPT_NODES:
+    for title in c['members']:
+        b = by_key.get(norm_title(title))
+        if b is None or b['kind'] != 'book':
+            missing.append(title); continue
+        if link(c, b, 'member', f'「{c["t"]}」に属する'): stat['member'] += 1
+if missing:
+    print(f'概念の未マッチ: {len(missing)} → {missing[:6]}')
+
 # --- (a) 同一著者：シリーズは next、それ以外は年代順リングで alt ---------
 def series_root(k):
     return re.sub(r'(上|下|中|[0-9]{1,2}|[ivx]{1,3})$', '', k)
 
+BOOKS_ONLY = [n for n in NODES if n['kind'] == 'book']
 by_author = defaultdict(list)
-for n in NODES:
+for n in BOOKS_ONLY:
     if n['a'] and n['a'] != '—': by_author[norm_author(n['a'])].append(n)
 
 for au, group in by_author.items():
@@ -161,7 +199,7 @@ for au, group in by_author.items():
 # --- (b) 同じ賞・同じ年 = 同時代の別視点 --------------------------------
 AWARD_YEAR = re.compile(r'(本屋大賞|直木賞|芥川賞|このミス|本格ミステリ大賞|日本推理作家協会賞|日本SF大賞|星雲賞|ヒューゴー賞|ネビュラ賞|SFが読みたい!|日本ホラー小説大賞|講談社科学出版賞|ビジネス書大賞|ビジネス書グランプリ|じんぶん大賞|新書大賞)[^0-9]*(\d{4})')
 yc = defaultdict(list)
-for n in NODES:
+for n in BOOKS_ONLY:
     for s in n['src']:
         m = AWARD_YEAR.search(s)
         if m: yc[(m.group(1), m.group(2))].append(n)
@@ -180,7 +218,7 @@ def lab_norm(s):
     return s.strip()
 
 lab = defaultdict(list)
-for n in NODES:
+for n in BOOKS_ONLY:
     for s in n['src']:
         if s: lab[lab_norm(s)].append(n)
 
@@ -272,10 +310,10 @@ def degmap():
     return d
 deg = degmap()
 by_cat = defaultdict(list)
-for n in NODES: by_cat[n['cat']].append(n)
+for n in BOOKS_ONLY: by_cat[n['cat']].append(n)
 for c in by_cat: by_cat[c].sort(key=lambda n: (n['y'] or 9999))
 
-for n in NODES:
+for n in BOOKS_ONLY:
     if deg[n['k']] > 0: continue
     pool = by_cat[n['cat']]
     i = pool.index(n)
@@ -308,8 +346,8 @@ for n in NODES:
     pos[idx[n['k']]] = hub[idx[n['k']]] + np.random.normal(0,180,2)
 
 ei = np.array([[idx[e['s']], idx[e['t']]] for e in EDGES])
-edist = np.array([30.0 if e['type']=='next' else 50.0 if e['type']=='pre' else 66.0 for e in EDGES])
-estr  = np.array([0.55 if e['type'] in ('next','pre') else 0.22 for e in EDGES])
+edist = np.array([26.0 if e['type']=='next' else 44.0 if e['type']=='pre' else 40.0 if e['type']=='member' else 66.0 for e in EDGES])
+estr  = np.array([0.75 if e['type']=='member' else 0.55 if e['type'] in ('next','pre') else 0.20 for e in EDGES])
 vel = np.zeros((N,2))
 MAXV = 45.0
 for it in range(900):
@@ -339,7 +377,8 @@ if sc < 1: pos *= sc
 print(f'layout      : x[{pos[:,0].min():.0f},{pos[:,0].max():.0f}] y[{pos[:,1].min():.0f},{pos[:,1].max():.0f}]')
 
 # ══════════ 5. 出力 ══════════
-out = {'nodes':[{'k':n['k'],'t':disp_title(n['t']),'full':n['t'],'a':n['a'],'y':n['y'],'cat':n['cat'],'s':n['s'],
+out = {'nodes':[{'k':n['k'],'t':disp_title(n['t']) if n['kind']=='book' else n['t'],'full':n['t'],
+                 'kind':n['kind'],'desc':n.get('desc',''),'a':n['a'],'y':n['y'],'cat':n['cat'],'s':n['s'],
                  'shelf':1 if n['shelf'] else 0,'src':n['src'][:2],'deg':deg[n['k']],
                  'px':round(float(pos[idx[n['k']]][0]),1),'py':round(float(pos[idx[n['k']]][1]),1)}
                 for n in NODES],
