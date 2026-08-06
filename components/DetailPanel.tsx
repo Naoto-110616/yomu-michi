@@ -40,22 +40,36 @@ export default function DetailPanel({
   onSelect: (i: number) => void
   onClose: () => void
 }) {
-  const starColor = node.star === null ? CATEGORY_META[node.cat].color : (STAR_COLOR[node.star] ?? '#6b7382')
+  const isConcept = node.kind === 'concept'
+  const starColor = isConcept
+    ? '#c4b5fd'
+    : node.star === null
+      ? CATEGORY_META[node.cat].color
+      : (STAR_COLOR[node.star] ?? '#6b7382')
   return (
     <aside className="absolute right-2.5 top-2.5 z-[5] max-h-[calc(100%-18px)] w-[min(330px,76vw)] overflow-y-auto rounded-[13px] border border-line bg-panel/[0.975] p-[14px_15px] backdrop-blur max-[640px]:inset-x-2 max-[640px]:bottom-2 max-[640px]:top-auto max-[640px]:max-h-[50%] max-[640px]:w-auto">
       <button onClick={onClose} className="float-right -mr-1 -mt-0.5 px-1 text-[17px] leading-none text-muted">
         ×
       </button>
+      {isConcept && (
+        <p className="m-0 mb-1 text-[10px] tracking-[0.12em] text-[#a78bfa]">概念</p>
+      )}
       <h2 className="m-0 mb-1 pr-4 text-[15px] leading-[1.45]">{node.title}</h2>
-      <p className="m-0 mb-2 text-[11.5px] text-muted">
-        {node.author}
-        {node.year > 0 && ` / ${node.year}`}
-      </p>
-      <p className="m-0 mb-1.5 text-[12.5px] tracking-[0.1em]" style={{ color: starColor }}>
-        {starLabel(node.star)}
-        {node.star === null && <span className="text-[11px] tracking-normal"> — 世間の本</span>}
-      </p>
-      <p className="m-0 mb-1.5 text-[11.5px] text-muted">{CATEGORY_META[node.cat].label}</p>
+      {isConcept ? (
+        <p className="m-0 mb-2 text-[12px] leading-[1.75] text-[#c3c9d2]">{node.desc}</p>
+      ) : (
+        <>
+          <p className="m-0 mb-2 text-[11.5px] text-muted">
+            {node.author}
+            {node.year > 0 && ` / ${node.year}`}
+          </p>
+          <p className="m-0 mb-1.5 text-[12.5px] tracking-[0.1em]" style={{ color: starColor }}>
+            {starLabel(node.star)}
+            {node.star === null && <span className="text-[11px] tracking-normal"> — 世間の本</span>}
+          </p>
+        </>
+      )}
+      {!isConcept && <p className="m-0 mb-1.5 text-[11.5px] text-muted">{CATEGORY_META[node.cat].label}</p>}
       {node.sources.map((s) => (
         <span key={s} className="mb-1 mr-1 inline-block rounded-full border border-line px-2 py-px text-[10.5px] text-dim">
           {s}
@@ -63,13 +77,17 @@ export default function DetailPanel({
       ))}
       {incoming.length > 0 && (
         <>
-          <p className="mb-1 mt-3 text-[10px] tracking-[0.05em] text-dim">▸ この本に向かっている ({incoming.length})</p>
+          <p className="mb-1 mt-3 text-[10px] tracking-[0.05em] text-dim">
+            ▸ {isConcept ? 'この概念に属する' : 'この本に向かっている'} ({incoming.length})
+          </p>
           <RelList items={incoming} nodes={nodes} onSelect={onSelect} />
         </>
       )}
       {outgoing.length > 0 && (
         <>
-          <p className="mb-1 mt-3 text-[10px] tracking-[0.05em] text-dim">▸ ここから伸びている ({outgoing.length})</p>
+          <p className="mb-1 mt-3 text-[10px] tracking-[0.05em] text-dim">
+            ▸ {isConcept ? 'この概念に属する' : 'ここから伸びている'} ({outgoing.length})
+          </p>
           <RelList items={outgoing} nodes={nodes} onSelect={onSelect} />
         </>
       )}
