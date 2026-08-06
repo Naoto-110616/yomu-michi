@@ -117,6 +117,13 @@ export interface Edge {
   weight?: number
   /** 紐付けた人数 */
   supporters?: number
+  /**
+   * AI推論ループの未検証エッジ。
+   *   proposed = AIが張った仮の線（破線・薄く・物理には載せない）
+   *   disputed = 人の判定で賛否が割れた線（赤い破線で残す）
+   * undefined = 検証済み・または人が張った実エッジ
+   */
+  status?: 'proposed' | 'disputed'
 }
 
 export interface Payload {
@@ -153,6 +160,16 @@ export interface GraphOverlay {
   concepts: { key: string; label: string; description: string; official: boolean }[]
   links: { concept: string; book: string; supporters: number; strength: number }[]
   bonds: { from: string; to: string; rel: 'pre' | 'next' | 'alt' | 'counter'; supporters: number; strength: number }[]
+  /** AI推論ループの提案。proposed / disputed だけが破線エッジとして地図に載る */
+  proposals?: {
+    id: string
+    kind: 'pre' | 'next' | 'alt' | 'counter' | 'member'
+    from: string
+    to: string
+    why: string
+    confidence: number
+    status: string
+  }[]
 }
 
 export function buildGraph(
@@ -266,6 +283,26 @@ export function buildGraph(
         why: `${bond.supporters}人 / 強さ 平均 ${bond.strength}`,
         weight: bond.strength, supporters: bond.supporters,
       })
+    }
+
+    // ── AIの提案（未検証エッジ）。破線で描くだけで、判定されるまで実エッジ扱いしない ──
+    if (overlay.proposals?.length) {
+      const have = new Set(edges.map((e) => `${e.type}:${nodes[e.from].key}:${nodes[e.to].key}`))
+      for (const pr of overlay.proposals) {
+        if (pr.status !== 'proposed' && pr.status !== 'disputed') continue
+        const type: RelationType = pr.kind === 'member' ? 'member' : pr.kind
+        const a = byKey.get(pr.from)
+        const b = byKey.get(pr.to)
+        if (!a || !b) continue
+        // 同種の実エッジが既にあるなら提案は描かない（合ってると判定済みの状態と同義）
+        if (have.has(`${type}:${a.key}:${b.key}`) || have.has(`${type}:${b.key}:${a.key}`)) continue
+        edges.push({
+          from: a.i, to: b.i, type,
+          why: `AIの提案: ${pr.why}（自信 ${Math.round(pr.confidence * 100)}%）`,
+          weight: 1,
+          status: pr.status as 'proposed' | 'disputed',
+        })
+      }
     }
 
     // ── 同じ著者・同シリーズの自動接続（後から実体化した本にも適用） ──
