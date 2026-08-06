@@ -117,11 +117,14 @@ export default function Atlas({ payload }: { payload: Payload }) {
       const i = byKey.get(k)
       if (i !== undefined) m.set(i, (m.get(i) ?? 0) + v)
     }
-    // 結びつきの強さ（平均×人数の対数）でノードが育つ
+    // 概念の育ち = 「この地図の持ち主が読んだ本」の紐付けだけが概念を育てる。
+    // 読んでいない本にいくら票が付いても、自分の概念は大きくならない
+    //（= 概念のサイズが自分の知識の広がりを表す、というサービスの前提）。
     for (const l of effectiveOverlay.links) {
       const v = l.strength * (1 + Math.log2(1 + l.supporters) * 0.4)
-      add(l.concept, v)
       add(l.book, v)
+      const bi = byKey.get(l.book)
+      if (bi !== undefined && graph.nodes[bi].shelf) add(l.concept, v)
     }
     for (const b of effectiveOverlay.bonds) {
       add(b.from, b.strength)
@@ -604,6 +607,62 @@ export default function Atlas({ payload }: { payload: Payload }) {
     return rows.length
   }, [user, payload])
 
+  /* ── ブクログCSVの取り込み（Shift_JIS対応・ヒューリスティック） ── */
+  const importBooklogCsv = useCallback(async (file: File): Promise<number> => {
+    const sb = getSupabase()
+    if (!sb || !user) return 0
+    const buf = await file.arrayBuffer()
+    let text = ''
+    try { text = new TextDecoder('shift_jis').decode(buf) } catch { /* fallthrough */ }
+    if (!text || text.includes('\\ufffd')) text = new TextDecoder().decode(buf)
+
+    const parseLine = (line: string): string[] => {
+      const out: string[] = []
+      let cur = ''
+      let q = false
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i]
+        if (q) {
+          if (c === '\"') { if (line[i + 1] === '\"') { cur += '\"'; i++ } else q = false }
+          else cur += c
+        } else if (c === '\"') q = true
+        else if (c === ',') { out.push(cur); cur = '' }
+        else cur += c
+      }
+      out.push(cur)
+      return out
+    }
+
+    const bakedKeys = new Set(payload.n.map((a) => a[11]))
+    const shelfRows: { user_id: string; book_key: string; star: number }[] = []
+    const bookRows: { key: string; isbn: string | null; title: string; author: string; cat: string; created_by: string }[] = []
+    for (const line of text.split(/\\r?\\n/)) {
+      if (!line.trim()) continue
+      const f = parseLine(line)
+      if (f.length < 13) continue
+      // ブクログのエクスポート列: [2]ISBN13 [4]評価 [5]読書状況 [11]タイトル [12]著者
+      const status = f[5]?.trim()
+      if (status !== '読み終わった' && status !== 'いま読んでる') continue
+      const title = f[11]?.trim()
+      if (!title) continue
+      const isbn = /^97[89]\\d{10}$/.test(f[2]?.trim() ?? '') ? f[2].trim() : ''
+      const star = /^[1-5]$/.test(f[4]?.trim() ?? '') ? Number(f[4].trim()) : 0
+      const norm = normalizeTitleKey(title)
+      const key = bakedKeys.has(norm) ? norm : isbn ? `isbn:${isbn}` : norm
+      if (!key) continue
+      shelfRows.push({ user_id: user.id, book_key: key, star })
+      if (!bakedKeys.has(key)) {
+        bookRows.push({ key, isbn: isbn || null, title, author: f[12]?.trim() ?? '', cat: 'lit', created_by: user.id })
+      }
+    }
+    for (let i = 0; i < bookRows.length; i += 50) await sb.from('books').upsert(bookRows.slice(i, i + 50))
+    for (let i = 0; i < shelfRows.length; i += 50) await sb.from('shelf').upsert(shelfRows.slice(i, i + 50))
+    const { data } = await sb.from('shelf').select('book_key, star')
+    setUserShelf(new Map((data ?? []).map((r) => [r.book_key as string, r.star as number])))
+    reloadOverlay()
+    return shelfRows.length
+  }, [user, payload, reloadOverlay])
+
   /* ── フォロー ───────────────────────────── */
   const toggleFollow = useCallback(async (profileId: string, on: boolean) => {
     const sb = getSupabase()
@@ -616,14 +675,17 @@ export default function Atlas({ payload }: { payload: Payload }) {
   /* ── 詳細パネル用 ─────────────────────────── */
   const relations = useMemo(() => {
     if (selected === null) return null
-    const incoming: { node: number; type: RelationType; why: string }[] = []
-    const outgoing: { node: number; type: RelationType; why: string }[] = []
+    const incoming: { node: number; type: RelationType; why: string; weight: number }[] = []
+    const outgoing: { node: number; type: RelationType; why: string; weight: number }[] = []
     for (const ei of graph.adjacency[selected]) {
       const e = graph.edges[ei]
       if (!edgeTypes.has(e.type)) continue
       const isIn = e.to === selected
-      ;(isIn ? incoming : outgoing).push({ node: isIn ? e.from : e.to, type: e.type, why: e.why })
+      ;(isIn ? incoming : outgoing).push({ node: isIn ? e.from : e.to, type: e.type, why: e.why, weight: e.weight ?? 1 })
     }
+    // 強度順 = 「この概念に最適な本」が上に来る
+    incoming.sort((a, b) => b.weight - a.weight)
+    outgoing.sort((a, b) => b.weight - a.weight)
     return { incoming, outgoing }
   }, [selected, graph, edgeTypes])
 
@@ -675,6 +737,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
             onToggleFollow={toggleFollow}
             onView={(p) => setViewing(p)}
             onImportSample={importSampleShelf}
+            onImportCsv={importBooklogCsv}
           />
           <button
             onClick={() => setControlsOpen((v) => !v)}
@@ -764,6 +827,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
             onSetTie={setTie}
             onSetBond={setBond}
             onCreateConcept={createConcept}
+            onAuthorClick={(a) => { setQuery(a); setSelected(null) }}
             onViewAccount={(id, username) => {
               if (user && id === user.id) return // 自分の島は自分
               setSelected(null)
