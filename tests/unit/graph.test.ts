@@ -43,8 +43,11 @@ describe('buildGraph: オーバーレイ（動的ノード + 紐付けの重み�
     books: [{ key: 'isbn:9999', title: '外の本', author: '誰か', year: 2024, cat: 'sf' }],
     concepts: [{ key: 'u_new', label: 'ユーザー概念', description: '', official: false }],
     links: [
-      { concept: 'c_test', book: 'book_a', supporters: 3 },  // 既存 member と合流
-      { concept: 'u_new', book: 'isbn:9999', supporters: 2 }, // 新しい枝
+      { concept: 'c_test', book: 'book_a', supporters: 3, strength: 4.5 },  // 既存 member と合流
+      { concept: 'u_new', book: 'isbn:9999', supporters: 2, strength: 2 },  // 新しい枝
+    ],
+    bonds: [
+      { a: 'book_a', b: 'book_b', supporters: 1, strength: 5 }, // 本と本の結びつき
     ],
   }
 
@@ -55,14 +58,24 @@ describe('buildGraph: オーバーレイ（動的ノード + 紐付けの重み�
     expect(dyn.find((n) => n.key === 'u_new')?.kind).toBe('concept')
   })
 
-  it('既存の所属エッジは票が上乗せされ、無い組は新設される', () => {
+  it('既存の所属エッジは平均強度に置き換わり、無い組は新設される', () => {
     const g = buildGraph(tinyPayload(), null, overlay)
     const members = g.edges.filter((e) => e.type === 'member')
     const merged = members.find((e) => g.nodes[e.from].key === 'c_test' && g.nodes[e.to].key === 'book_a')
-    expect(merged?.weight).toBe(4) // 焼き込み1 + 票3
+    expect(merged?.weight).toBe(4.5) // 票の平均強度で置き換え
+    expect(merged?.supporters).toBe(3)
     const created = members.find((e) => g.nodes[e.from].key === 'u_new')
     expect(created?.weight).toBe(2)
     expect(g.nodes[created!.to].key).toBe('isbn:9999')
+  })
+
+  it('本と本の結びつき（bond）エッジが平均強度つきで作られる', () => {
+    const g = buildGraph(tinyPayload(), null, overlay)
+    const bond = g.edges.find((e) => e.type === 'bond')
+    expect(bond).toBeDefined()
+    expect(bond?.weight).toBe(5)
+    expect(g.nodes[bond!.from].key).toBe('book_a')
+    expect(g.nodes[bond!.to].key).toBe('book_b')
   })
 })
 

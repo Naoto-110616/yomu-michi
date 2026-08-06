@@ -47,10 +47,16 @@ test.afterAll(async () => {
 
 /** 本番と同じ「オーバーレイ到着 → グラフ再構築」を必ず起こす */
 async function mockSupabase(page: Page) {
+  // 未指定のエンドポイントは空配列（Playwright は後に登録した route が優先）
+  await page.route('**/*.supabase.co/rest/v1/**', (r) => r.fulfill({ json: [] }))
   await page.route('**/*.supabase.co/rest/v1/concept_link_strength**', (r) =>
     r.fulfill({ json: [
-      { concept_key: 'cat:phil', book_key: '夜と霧', supporters: 2 },
-      { concept_key: 'cat:phil', book_key: '史上最強の哲学入門', supporters: 1 },
+      { concept_key: 'cat:phil', book_key: '夜と霧', supporters: 2, strength: 4.5 },
+      { concept_key: 'cat:phil', book_key: '史上最強の哲学入門', supporters: 1, strength: 3 },
+    ] }))
+  await page.route('**/*.supabase.co/rest/v1/book_link_strength**', (r) =>
+    r.fulfill({ json: [
+      { a_key: 'サピエンス全史上', b_key: '銃・病原菌・鉄', supporters: 1, strength: 5 },
     ] }))
   await page.route('**/*.supabase.co/rest/v1/concepts**', (r) =>
     r.fulfill({ json: [

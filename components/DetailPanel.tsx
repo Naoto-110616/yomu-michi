@@ -3,13 +3,25 @@
 import { useState } from 'react'
 
 import { CATEGORY_META, RELATION_META, STAR_COLOR, starLabel, type BookNode, type RelationType } from '@/lib/graph'
-import { readLinks } from '@/lib/overlay'
+import { bondPair, coverUrl, readLinks } from '@/lib/overlay'
 
 export interface ConceptChip {
   key: string
   label: string
   supporters: number
-  mine: boolean
+  /** 全ユーザーの平均強度 1-5 */
+  strength: number
+  /** 自分が付けた強度。未紐付けなら null */
+  mine: number | null
+}
+
+export interface BondChip {
+  otherKey: string
+  otherIndex: number
+  label: string
+  supporters: number
+  strength: number
+  mine: number | null
 }
 
 type Rel = { node: number; type: RelationType; why: string }
@@ -42,7 +54,7 @@ function RelList({ items, nodes, onSelect }: { items: Rel[]; nodes: BookNode[]; 
 
 export default function DetailPanel({
   node, nodes, incoming, outgoing, canRate, onRate, onSelect, onClose,
-  chips, allConcepts, onToggleLink, onCreateConcept,
+  chips, bonds, allConcepts, onSetTie, onSetBond, onCreateConcept,
 }: {
   node: BookNode
   nodes: BookNode[]
@@ -54,9 +66,11 @@ export default function DetailPanel({
   onClose: () => void
   /** この本に付いている概念（投票数つき） */
   chips: ConceptChip[]
+  bonds: BondChip[]
   /** 紐付け候補（公式 + ユーザー概念） */
   allConcepts: { key: string; label: string }[]
-  onToggleLink: (conceptKey: string, bookKey: string, currentlyMine: boolean) => void
+  onSetTie: (conceptKey: string, bookKey: string, strength: number | null) => void
+  onSetBond: (bookKey: string, otherKey: string, strength: number | null) => void
   onCreateConcept: (label: string, bookKey: string) => void
 }) {
   const isConcept = node.kind === 'concept'
@@ -73,6 +87,7 @@ export default function DetailPanel({
       {isConcept && (
         <p className="m-0 mb-1 text-[10px] tracking-[0.12em] text-[#a78bfa]">概念</p>
       )}
+      {!isConcept && <Cover node={node} />}
       <h2 className="m-0 mb-1 pr-4 text-[15px] leading-[1.45]">{node.title}</h2>
       {isConcept ? (
         <p className="m-0 mb-2 text-[12px] leading-[1.75] text-[#c3c9d2]">{node.desc}</p>
@@ -112,7 +127,10 @@ export default function DetailPanel({
       {!isConcept && <p className="m-0 mb-1.5 text-[11.5px] text-muted">{CATEGORY_META[node.cat].label}</p>}
       {!isConcept && <ConceptChips
         node={node} chips={chips} allConcepts={allConcepts} canRate={canRate}
-        onToggleLink={onToggleLink} onCreateConcept={onCreateConcept} />}
+        onSetTie={onSetTie} onCreateConcept={onCreateConcept} />}
+      {!isConcept && <BondChips
+        node={node} nodes={nodes} bonds={bonds} canRate={canRate}
+        onSetBond={onSetBond} onSelect={onSelect} />}
       {!isConcept && <ReadLinks node={node} />}
       {node.sources.map((s) => (
         <span key={s} className="mb-1 mr-1 inline-block rounded-full border border-line px-2 py-px text-[10.5px] text-dim">
@@ -145,17 +163,52 @@ export default function DetailPanel({
 
 /* ── この本が属する概念（＝ハッシュタグ + 投票） ─────────────── */
 
+/** 1-5 の強度スター。value=null は未設定 */
+function StarStrength({ value, onPick }: { value: number | null; onPick: (s: number | null) => void }) {
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      {[1, 2, 3, 4, 5].map((s) => (
+        <button
+          key={s}
+          onClick={(e) => { e.stopPropagation(); onPick(value === s ? null : s) }}
+          className="px-px text-[14px] leading-none transition-transform active:scale-125"
+          style={{ color: value !== null && value >= s ? '#a78bfa' : '#39404e' }}
+          aria-label={`強さ${s}`}
+        >
+          ★
+        </button>
+      ))}
+    </span>
+  )
+}
+
+function Cover({ node }: { node: BookNode }) {
+  const [hidden, setHidden] = useState(false)
+  const url = coverUrl(node.isbn)
+  if (!url || hidden) return null
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={url}
+      alt=""
+      onError={() => setHidden(true)}
+      className="float-right ml-2 mb-1 h-[92px] w-auto rounded-md border border-line object-cover"
+    />
+  )
+}
+
 function ConceptChips({
-  node, chips, allConcepts, canRate, onToggleLink, onCreateConcept,
+  node, chips, allConcepts, canRate, onSetTie, onCreateConcept,
 }: {
   node: BookNode
   chips: ConceptChip[]
   allConcepts: { key: string; label: string }[]
   canRate: boolean
-  onToggleLink: (conceptKey: string, bookKey: string, currentlyMine: boolean) => void
+  onSetTie: (conceptKey: string, bookKey: string, strength: number | null) => void
   onCreateConcept: (label: string, bookKey: string) => void
 }) {
   const [adding, setAdding] = useState(false)
+  const [open, setOpen] = useState<string | null>(null)
   const [q, setQ] = useState('')
   const attached = new Set(chips.map((c) => c.key))
   const candidates = allConcepts
@@ -166,23 +219,31 @@ function ConceptChips({
 
   return (
     <div className="mb-2">
-      <p className="mb-1 mt-1 text-[10px] tracking-[0.05em] text-dim">▸ 概念（紐付けた人数が太さになる）</p>
+      <p className="mb-1 mt-1 text-[10px] tracking-[0.05em] text-dim">
+        ▸ 概念との結びつき（強さ1-5の平均が太さになる）
+      </p>
       <div className="flex flex-wrap gap-1.5">
         {chips.map((c) => (
-          <button
-            key={c.key}
-            disabled={!canRate}
-            onClick={() => onToggleLink(c.key, node.key, c.mine)}
-            title={canRate ? (c.mine ? 'タップで紐付けを外す' : 'タップで自分も紐付ける') : 'ログインすると紐付けられます'}
-            className={`inline-flex items-center gap-1 rounded-full border px-2 py-[3px] text-[11px] transition-colors ${
-              c.mine
-                ? 'border-[#7c6bd6] bg-[#a78bfa]/25 text-[#e9d5ff]'
-                : 'border-[#3b3357] bg-[#a78bfa]/10 text-[#c4b5fd]'
-            } disabled:opacity-70`}
-          >
-            #{c.label}
-            <span className="text-[10px] tabular-nums opacity-80">{c.supporters}</span>
-          </button>
+          <span key={c.key} className="inline-flex flex-col">
+            <button
+              onClick={() => canRate && setOpen(open === c.key ? null : c.key)}
+              title={canRate ? '自分の強さを付ける' : 'ログインすると強さを付けられます'}
+              className={`inline-flex items-center gap-1 rounded-full border px-2 py-[3px] text-[11px] transition-colors ${
+                c.mine !== null
+                  ? 'border-[#7c6bd6] bg-[#a78bfa]/25 text-[#e9d5ff]'
+                  : 'border-[#3b3357] bg-[#a78bfa]/10 text-[#c4b5fd]'
+              }`}
+            >
+              #{c.label}
+              <span className="text-[10px] tabular-nums opacity-90">{c.strength.toFixed(1)}</span>
+              <span className="text-[9.5px] tabular-nums opacity-60">({c.supporters}人)</span>
+            </button>
+            {open === c.key && (
+              <span className="mt-1 flex items-center gap-1 rounded-lg border border-line bg-panel2 px-1.5 py-1">
+                <StarStrength value={c.mine} onPick={(st) => { onSetTie(c.key, node.key, st); setOpen(null) }} />
+              </span>
+            )}
+          </span>
         ))}
         {canRate && !adding && (
           <button
@@ -206,7 +267,7 @@ function ConceptChips({
             {candidates.map((c) => (
               <button
                 key={c.key}
-                onClick={() => { onToggleLink(c.key, node.key, false); setAdding(false); setQ('') }}
+                onClick={() => { onSetTie(c.key, node.key, 3); setAdding(false); setQ('') }}
                 className="rounded-full border border-[#3b3357] bg-[#a78bfa]/10 px-2 py-[3px] text-[11px] text-[#c4b5fd]"
               >
                 #{c.label}
@@ -224,6 +285,89 @@ function ConceptChips({
           <button onClick={() => { setAdding(false); setQ('') }} className="mt-1 text-[10px] text-dim">
             閉じる
           </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── 本と本の結びつき ─────────────────────────────── */
+
+function BondChips({
+  node, nodes, bonds, canRate, onSetBond, onSelect,
+}: {
+  node: BookNode
+  nodes: BookNode[]
+  bonds: BondChip[]
+  canRate: boolean
+  onSetBond: (bookKey: string, otherKey: string, strength: number | null) => void
+  onSelect: (i: number) => void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [open, setOpen] = useState<string | null>(null)
+  const [q, setQ] = useState('')
+  const attached = new Set(bonds.map((b) => b.otherKey))
+  const candidates = q.trim().length >= 2
+    ? nodes
+        .filter((n) => n.kind === 'book' && n.key !== node.key && !attached.has(n.key))
+        .filter((n) => n.title.toLowerCase().includes(q.toLowerCase()))
+        .slice(0, 6)
+    : []
+  return (
+    <div className="mb-2">
+      <p className="mb-1 mt-2 text-[10px] tracking-[0.05em] text-dim">▸ 結びつく本</p>
+      <div className="flex flex-wrap gap-1.5">
+        {bonds.map((b) => (
+          <span key={b.otherKey} className="inline-flex flex-col">
+            <button
+              onClick={() => (canRate ? setOpen(open === b.otherKey ? null : b.otherKey) : onSelect(b.otherIndex))}
+              className={`inline-flex items-center gap-1 rounded-full border px-2 py-[3px] text-[11px] transition-colors ${
+                b.mine !== null
+                  ? 'border-[#0e7490] bg-[#22d3ee]/20 text-[#a5f3fc]'
+                  : 'border-[#155e70] bg-[#22d3ee]/10 text-[#67e8f9]'
+              }`}
+            >
+              {b.label.length > 12 ? b.label.slice(0, 11) + '…' : b.label}
+              <span className="text-[10px] tabular-nums opacity-90">{b.strength.toFixed(1)}</span>
+            </button>
+            {open === b.otherKey && (
+              <span className="mt-1 flex items-center gap-1.5 rounded-lg border border-line bg-panel2 px-1.5 py-1">
+                <StarStrength value={b.mine} onPick={(st) => { onSetBond(node.key, b.otherKey, st); setOpen(null) }} />
+                <button onClick={() => onSelect(b.otherIndex)} className="text-[10px] text-dim">見る</button>
+              </span>
+            )}
+          </span>
+        ))}
+        {canRate && !adding && (
+          <button
+            onClick={() => setAdding(true)}
+            className="rounded-full border border-dashed border-line px-2 py-[3px] text-[11px] text-dim active:text-muted"
+          >
+            ＋ 本と結びつける
+          </button>
+        )}
+      </div>
+      {adding && (
+        <div className="mt-1.5 rounded-[10px] border border-line bg-panel2 p-2">
+          <input
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="結びつける本のタイトルを検索…"
+            className="mb-1.5 w-full appearance-none rounded-lg border border-line bg-panel px-2 py-1.5 text-[12px] text-text outline-none placeholder:text-dim"
+          />
+          <div className="flex flex-wrap gap-1">
+            {candidates.map((n) => (
+              <button
+                key={n.key}
+                onClick={() => { onSetBond(node.key, n.key, 3); setAdding(false); setQ('') }}
+                className="rounded-full border border-[#155e70] bg-[#22d3ee]/10 px-2 py-[3px] text-[11px] text-[#67e8f9]"
+              >
+                {n.title.length > 14 ? n.title.slice(0, 13) + '…' : n.title}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => { setAdding(false); setQ('') }} className="mt-1 text-[10px] text-dim">閉じる</button>
         </div>
       )}
     </div>
