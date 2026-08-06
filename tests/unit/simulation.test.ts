@@ -38,7 +38,7 @@ describe('Simulation: 沈静化（震え禁止）', () => {
   })
 })
 
-describe('Simulation: ドラッグ（Obsidian 的な掴む→追従→余音）', () => {
+describe('Simulation: ドラッグ（Obsidian 的な掴む→追従→余韻）', () => {
   it('掴んだノードはポインタに固定され、離すと再び止まる', () => {
     const { sim } = setup()
     runUntilStill(sim)
@@ -54,7 +54,7 @@ describe('Simulation: ドラッグ（Obsidian 的な掴む→追従→余音）'
 
     sim.endDrag()
     const steps = runUntilStill(sim)
-    expect(steps).not.toBe(-1) // 余音のあと必ず沈静化
+    expect(steps).not.toBe(-1) // 余韻のあと必ず沈静化
   })
 
   it('隣接ノードがバネで追従する', () => {

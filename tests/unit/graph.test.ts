@@ -12,7 +12,7 @@ describe('buildGraph: 階層（概念 > 読んだ本 > 紐づく本 > その他�
     expect(g.nodes[4].tier).toBe('far')    // 2ホップ先
   })
 
-  it('概念一覧と隣接リストが破綶していない', () => {
+  it('概念一覧と隣接リストが破綻していない', () => {
     const g = buildGraph(tinyPayload())
     expect(g.concepts).toEqual([0])
     expect(g.adjacency[1].length).toBe(3) // member + alt + pre
