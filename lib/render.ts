@@ -45,7 +45,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   const k = Math.max(T.k, 0.25)
   const focus = s.selected ?? s.hovered
 
-  // ── エッジ ─────────────────────────
+  // ── エッジ ─────────────────────────────
   for (const ei of s.visibleEdges) {
     const e = graph.edges[ei]
     const meta = RELATION_META[e.type]
