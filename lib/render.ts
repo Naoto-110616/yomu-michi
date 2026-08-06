@@ -53,6 +53,20 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     const a = Math.min(fade[e.from], fade[e.to])
     if (a < 0.02) continue
 
+    // AIの未検証エッジ: 細かい破線でうっすら。disputed（賛否が割れた）は赤く残す
+    if (e.status) {
+      ctx.globalAlpha = a * (e.status === 'disputed' ? 0.55 : 0.32)
+      ctx.strokeStyle = e.status === 'disputed' ? '#ef4444' : meta.color
+      ctx.lineWidth = 1 / k
+      ctx.setLineDash([2.5 / k, 4.5 / k])
+      ctx.beginPath()
+      ctx.moveTo(P[e.from].x, P[e.from].y)
+      ctx.lineTo(P[e.to].x, P[e.to].y)
+      ctx.stroke()
+      ctx.setLineDash([])
+      continue
+    }
+
     const strong = e.type !== 'alt'
     const w = e.weight ?? 1 // 平均強度 1-5
     // 票（ユーザーの紐付け）を持つエッジは、タイプを問わず強度で太さが変わる
