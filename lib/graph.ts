@@ -127,7 +127,7 @@ export interface Payload {
   S: string[]
   W: string[]
   D: string[]
-  n: [string, number, number, number, number, number, number, number, number[], number, number, string][]
+  n: [string, number, number, number, number, number, number, number, number[], number, number, string, string?][]
   e: [number, number, number, number][]
   meta: { nodes: number; edges: number; shelf: number; byType: Record<string, number>; raw: number }
 }
@@ -168,6 +168,7 @@ export function buildGraph(
       i,
       key,
       kind,
+      isbn: (a[12] as string) || undefined,
       title: a[0],
       author: p.A[a[1]] ?? '',
       desc: a[10] >= 0 ? (p.D?.[a[10]] ?? '') : '',
