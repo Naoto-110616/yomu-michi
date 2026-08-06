@@ -164,6 +164,30 @@ export async function searchNdl(q: string): Promise<NdlItem[]> {
 /** NDL の本 → 実体化キー。ISBN があれば ISBN、無ければタイトルで */
 export const ndlKey = (item: NdlItem) => (item.isbn ? `isbn:${item.isbn}` : item.title.replace(/\s+/g, '').toLowerCase())
 
+/**
+ * パイプラインの norm_title と同じ規則のJS版。
+ * NDL から追加する本が、焼き込みの本と重複ノードにならないための照合に使う。
+ * （例: 「夜と霧 新版」→ 夜と霧 → 既存ノードに合流し、ISBN と表紙だけが付く）
+ */
+export function normalizeTitleKey(raw: string): string {
+  let t = raw
+    .replace(/[【〈《（(].*?[】〉》）)]/g, '')
+    .replace(/^(新装版|完全版|増補改訂版|増補版|改訂版|完訳|新版)[\s　]*/, '')
+  for (const sep of ['――', '—', '―', ' - ', '／', '：', ':']) {
+    const i = t.indexOf(sep)
+    if (i > 0) t = t.slice(0, i)
+  }
+  const EDITION = /^(新版|新装版|改訂版|完全版|文庫版|愛蔵版)$/
+  const VOL = /^(上|中|下|[0-9０-９]{1,2}|[IVXivx]{1,4})$/
+  const parts = t.trim().split(/[\s　]+/).filter((p) => p && !EDITION.test(p))
+  if (!parts.length) return ''
+  let head = parts[0]
+  const vols = parts.slice(1).filter((p) => VOL.test(p))
+  if (vols.length) head += vols.join('')
+  else if (head.length < 4 && parts[1]) head += parts[1]
+  return head.replace(/[\s　]/g, '').toLowerCase()
+}
+
 /** 本と本の結びつきの正規化（無向: 辞書順で a < b） */
 export const bondPair = (x: string, y: string): [string, string] => (x < y ? [x, y] : [y, x])
 
