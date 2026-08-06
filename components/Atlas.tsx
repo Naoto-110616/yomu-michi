@@ -279,11 +279,28 @@ export default function Atlas({ payload }: { payload: Payload }) {
   useEffect(() => {
     const tiers = new Set(DEPTHS[depth].tiers)
     const nodeIds = new Set<number>()
-    // 概念は「自分の棚の本に紐付いているもの」だけを既定で出す。
+    // 概念の表示ルール:
+    //   ログイン中 = 「自分が紐付けた or 自分が作った」概念だけ（自分の知識の軸だけが立つ）
+    //   他人の地図 = その人の紐付けがある概念
+    //   ゲスト     = サンプル本棚に紐付いている概念
     // それ以外の概念は絞り込みのチップから選んだとき（selected 経由）だけ現れる。
+    const ownConceptKeys = (() => {
+      if (!user || viewing) return null
+      const s = new Set<string>()
+      for (const k of effectiveOverlay.mine.keys()) {
+        const parts = k.split('::')
+        if (parts.length === 2) s.add(parts[0]) // concept::book（3要素は本と本の紐付け）
+      }
+      for (const c of effectiveOverlay.concepts) if (c.createdBy === user.id) s.add(c.key)
+      return s
+    })()
     const activeConcepts = new Set<number>()
     for (const n of graph.nodes) {
       if (n.kind !== 'concept') continue
+      if (ownConceptKeys) {
+        if (ownConceptKeys.has(n.key)) activeConcepts.add(n.i)
+        continue
+      }
       for (const ei of graph.adjacency[n.i]) {
         const e = graph.edges[ei]
         if (e.type !== 'member') continue
@@ -296,8 +313,11 @@ export default function Atlas({ payload }: { payload: Payload }) {
         if (activeConcepts.has(n.i)) nodeIds.add(n.i)
         return
       }
-      // 動的ノード（実体化した本・アカウントの島）は絞り込みに関係なく出す
-      if (n.dynamic) { nodeIds.add(n.i); return }
+      // アカウントとフォローの島の本だけは絞り込みに関係なく常設
+      if (n.kind === 'account' || n.key.includes('::')) { nodeIds.add(n.i); return }
+      // それ以外（動的に実体化した本も含む）は階層で判定する。
+      // 読んだ本 = shelf、そこから紐づく本 = linked。誰かが実体化しただけの
+      // 無関係な本（far）は既定では出ない = 「自分が読んだものだけの地図」
       if (!tiers.has(n.tier)) return
       if (!categories.has(n.cat)) return
       if (mode === 'shelf' && !n.shelf) return
@@ -325,7 +345,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     sim.setVisible(graph, nodeIds, eids)
     setVisibleCount(nodeIds.size)
     kick()
-  }, [graph, sim, depth, categories, edgeTypes, mode, nodeScale, selected, boosts, kick])
+  }, [graph, sim, depth, categories, edgeTypes, mode, nodeScale, selected, boosts, kick, user, viewing, effectiveOverlay])
 
   /* ── 強調（不透明度の目標値）。物理は動かさない ── */
   useEffect(() => {
@@ -594,12 +614,12 @@ export default function Atlas({ payload }: { payload: Payload }) {
     reloadOverlay()
   }, [user, reloadOverlay])
 
-  const createConcept = useCallback(async (label: string, bookKey: string) => {
+  const createConcept = useCallback(async (label: string, bookKey?: string) => {
     const sb = getSupabase()
     if (!sb || !user) return
     const key = `u_${crypto.randomUUID().slice(0, 8)}`
     const { error } = await sb.from('concepts').insert({ key, label, description: '', official: false, created_by: user.id })
-    if (!error) {
+    if (!error && bookKey) {
       await sb.from('concept_links').upsert({ concept_key: key, book_key: bookKey, user_id: user.id })
     }
     reloadOverlay()
@@ -670,7 +690,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
         bookRows.push({ key, isbn: isbn || null, title, author: f[12]?.trim() ?? '', cat: 'lit', created_by: user.id })
       }
     }
-    for (let i = 0; i < bookRows.length; i += 50) await sb.from('books').upsert(bookRows.slice(i, i + 50))
+    for (let i = 0; i < bookRows.length; i += 50) await sb.from('books').upsert(bookRows.slice(i, i + 50), { ignoreDuplicates: true })
     for (let i = 0; i < shelfRows.length; i += 50) await sb.from('shelf').upsert(shelfRows.slice(i, i + 50))
     const { data } = await sb.from('shelf').select('book_key, star')
     setUserShelf(new Map((data ?? []).map((r) => [r.book_key as string, r.star as number])))
@@ -708,7 +728,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
         bookRows.push({ key, isbn: it.isbn || null, title: it.title, author: '', cat: 'lit', created_by: user.id })
       }
     }
-    for (let i = 0; i < bookRows.length; i += 50) await sb.from('books').upsert(bookRows.slice(i, i + 50))
+    for (let i = 0; i < bookRows.length; i += 50) await sb.from('books').upsert(bookRows.slice(i, i + 50), { ignoreDuplicates: true })
     for (let i = 0; i < shelfRows.length; i += 50) await sb.from('shelf').upsert(shelfRows.slice(i, i + 50))
     await sb.from('profiles').update({ booklog_id: booklogId }).eq('id', user.id)
     setMyBooklogId(booklogId)
@@ -727,18 +747,31 @@ export default function Atlas({ payload }: { payload: Payload }) {
     if (!sb || !user) return
     await sb.from('verdicts').upsert({ proposal_id: p.id, user_id: user.id, vote: v })
     if (v === 'yes') {
+      // 地図に無い側の本を実体化する。承認した瞬間に「未読の前提」が
+      // 紐づく本として地図に現れる = 次に読む本が視覚で分かる
+      const known = new Set(graph.nodes.map((n) => n.key))
+      const ensure = async (key: string) => {
+        if (known.has(key)) return
+        await sb.from('books').upsert(
+          { key, title: key, author: '', cat: 'lit', created_by: user.id },
+          { ignoreDuplicates: true },
+        )
+      }
       if (p.kind === 'member') {
+        await ensure(p.to)
         await sb.from('concept_links').upsert({
           concept_key: p.from, book_key: p.to, user_id: user.id, strength: 3,
         })
       } else {
+        await ensure(p.from)
+        await ensure(p.to)
         await sb.from('book_links').upsert({
           from_key: p.from, to_key: p.to, rel: p.kind, user_id: user.id, strength: 3,
         })
       }
     }
     reloadOverlay()
-  }, [user, reloadOverlay])
+  }, [user, graph, reloadOverlay])
 
   /* ── フォロー ───────────────────────────── */
   const toggleFollow = useCallback(async (profileId: string, on: boolean) => {
@@ -778,6 +811,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
   }, [graph])
 
   const keyTitle = useMemo(() => new Map(graph.nodes.map((n) => [n.key, n.title])), [graph])
+  const keyIndex = useMemo(() => new Map(graph.nodes.map((n) => [n.key, n.i])), [graph])
 
   const toggle = <T,>(set: Set<T>, v: T): Set<T> => {
     const next = new Set(set)
@@ -849,6 +883,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
         onQuery={setQuery}
         concepts={graph.concepts.map((i) => graph.nodes[i])}
         onPickConcept={select}
+        conceptCreate={{ loggedIn: !!user, onCreate: (label) => createConcept(label) }}
         worldSearch={{
           loggedIn: !!user,
           knownKeys: new Set(graph.nodes.map((n) => n.key)),
@@ -906,6 +941,17 @@ export default function Atlas({ payload }: { payload: Payload }) {
                 }
               })
               .filter((b) => b.otherIndex >= 0)
+              .sort((a, b) => b.strength - a.strength)}
+            conceptBooks={effectiveOverlay.links
+              .filter((l) => l.concept === graph.nodes[selected].key)
+              .map((l) => ({
+                key: l.book,
+                index: keyIndex.get(l.book) ?? -1,
+                title: keyTitle.get(l.book) ?? titleIndex.get(l.book)?.title ?? l.book,
+                supporters: l.supporters,
+                strength: l.strength,
+                mine: overlay.mine.get(`${l.concept}::${l.book}`) ?? null,
+              }))
               .sort((a, b) => b.strength - a.strength)}
             allConcepts={overlay.concepts.map((c) => ({ key: c.key, label: c.label }))}
             shelfBooks={graph.nodes
