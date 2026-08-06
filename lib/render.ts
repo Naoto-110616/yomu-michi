@@ -45,7 +45,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   const k = Math.max(T.k, 0.25)
   const focus = s.selected ?? s.hovered
 
-  // ── エッジ ─────────────────────────────
+  // ── エッジ ───────────────────────
   for (const ei of s.visibleEdges) {
     const e = graph.edges[ei]
     if (!e) continue // グラフ再構築の瞬間に古いインデックスが混ざっても落とさない
@@ -55,7 +55,8 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
 
     const strong = e.type !== 'alt'
     const w = e.weight ?? 1 // 平均強度 1-5
-    const tie = e.type === 'member' || e.type === 'bond'
+    // 票（ユーザーの紐付け）を持つエッジは、タイプを問わず強度で太さが変わる
+    const tie = e.type === 'member' || (e.supporters ?? 0) > 0
     // 強度1→細く控えめ、強度5→太く明るく。人数はわずかに輝きへ
     const tieWidth = 0.8 + (w - 1) * 0.95
     const tieGlow = Math.min(0.4 + (w - 1) * 0.12 + Math.min((e.supporters ?? 1) - 1, 4) * 0.04, 0.95)
@@ -89,7 +90,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     }
   }
 
-  // ── ノード ─────────────────────────────
+  // ── ノード ───────────────────────
   for (const i of sim.activeList) {
     const n = graph.nodes[i]
     const a = fade[i]
@@ -139,7 +140,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     }
   }
 
-  // ── ラベル（優先度順・衝突したら捨てる）──────────
+  // ── ラベル（優先度順・衝突したら捨てる）──────
   const boxes: [number, number, number, number][] = []
   const free = (a: number, b: number, c: number, d: number) => {
     for (const r of boxes) if (a < r[2] && c > r[0] && b < r[3] && d > r[1]) return false
@@ -189,7 +190,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   ctx.globalAlpha = 1
 }
 
-/* ── 座標変換 / ヒットテスト ───────────────────────── */
+/* ── 座標変換 / ヒットテスト ────────────────── */
 
 export const toWorld = (T: Transform, sx: number, sy: number) => ({
   x: (sx - T.x) / T.k,

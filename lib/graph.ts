@@ -8,7 +8,7 @@
  * このプロダクトの中身は、単なる「関連」ではなく関係の種類を区別することにある。
  */
 
-export const RELATIONS = ['member', 'bond', 'follow', 'overlap', 'pre', 'next', 'alt', 'counter'] as const
+export const RELATIONS = ['member', 'follow', 'overlap', 'pre', 'next', 'alt', 'counter'] as const
 export type RelationType = (typeof RELATIONS)[number]
 
 export const RELATION_META: Record<
@@ -18,10 +18,6 @@ export const RELATION_META: Record<
   member: {
     label: '所属', color: '#a78bfa', dashed: false, directed: false,
     hint: 'この概念に属する本（太さ = 結びつきの平均強度）',
-  },
-  bond: {
-    label: '結びつき', color: '#22d3ee', dashed: false, directed: false,
-    hint: 'ユーザーが結びつけた本どうし',
   },
   follow: {
     label: 'フォロー', color: '#f0abfc', dashed: false, directed: true,
@@ -156,7 +152,7 @@ export interface GraphOverlay {
   books: { key: string; title: string; author: string; year: number; cat: string; isbn?: string }[]
   concepts: { key: string; label: string; description: string; official: boolean }[]
   links: { concept: string; book: string; supporters: number; strength: number }[]
-  bonds: { a: string; b: string; supporters: number; strength: number }[]
+  bonds: { from: string; to: string; rel: 'pre' | 'next' | 'alt' | 'counter'; supporters: number; strength: number }[]
 }
 
 export function buildGraph(
@@ -254,16 +250,38 @@ export function buildGraph(
         })
       }
     }
-    // 本と本の結びつき
+    // 本と本の紐付け（前提/続き/似ている/反論 — 地図の共通語彙で描く）
     for (const bond of overlay.bonds) {
-      const a = byKey.get(bond.a)
-      const b = byKey.get(bond.b)
+      const a = byKey.get(bond.from)
+      const b = byKey.get(bond.to)
       if (!a || !b) continue
       edges.push({
-        from: a.i, to: b.i, type: 'bond',
+        from: a.i, to: b.i, type: bond.rel,
         why: `${bond.supporters}人 / 強さ 平均 ${bond.strength}`,
         weight: bond.strength, supporters: bond.supporters,
       })
+    }
+
+    // ── 同じ著者・同シリーズの自動接続（後から実体化した本にも適用） ──
+    const normAuthor = (a: string) =>
+      a.replace(/[\s・,、.=＝]/g, '').toLowerCase().slice(0, 8)
+    const titleRoot = (t: string) =>
+      t.replace(/[\s　]/g, '').replace(/(上|下|中|[0-9０-９]{1,3}|[ivxIVX]{1,4})$/, '').toLowerCase()
+    const dyn = nodes.filter((n) => n.dynamic && n.kind === 'book')
+    for (const d of dyn) {
+      if (!d.author || d.author === '—') continue
+      const dA = normAuthor(d.author)
+      const dRoot = titleRoot(d.title)
+      for (const n of nodes) {
+        if (n.i === d.i || n.kind !== 'book') continue
+        if (n.author && n.author !== '—' && dA.length >= 3 && normAuthor(n.author) === dA) {
+          if (dRoot.length >= 3 && titleRoot(n.title) === dRoot) {
+            edges.push({ from: n.i, to: d.i, type: 'next', why: '同シリーズ（自動接続）', weight: 1 })
+          } else {
+            edges.push({ from: n.i, to: d.i, type: 'alt', why: `同じ著者（${d.author}・自動接続）`, weight: 1 })
+          }
+        }
+      }
     }
     // 動的概念ノードの初期位置は、紐付いた本の重心の近くへ
     for (const n of nodes) {
@@ -271,8 +289,8 @@ export function buildGraph(
       const linked = [
         ...overlay.links.filter((l) => l.concept === n.key || l.book === n.key)
           .map((l) => ({ other: l.concept === n.key ? l.book : l.concept })),
-        ...overlay.bonds.filter((l) => l.a === n.key || l.b === n.key)
-          .map((l) => ({ other: l.a === n.key ? l.b : l.a })),
+        ...overlay.bonds.filter((l) => l.from === n.key || l.to === n.key)
+          .map((l) => ({ other: l.from === n.key ? l.to : l.from })),
       ]
       const anchors = linked
         .map((l) => byKey.get(l.other))
@@ -292,7 +310,7 @@ export function buildGraph(
     nodes[e.to].degree++
   })
 
-  // ── 階層を決める ──────────────────────────────
+  // ── 階層を決める ────────────────────────
   // 概念 → 読んだ本 → そのどちらかに1ホップで繋がる本 → それ以外
   const core = new Set<number>()
   nodes.forEach((n) => {
@@ -314,7 +332,7 @@ export function buildGraph(
   }
 }
 
-/* ── 表示のためのヘルパー ───────────────────────── */
+/* ── 表示のためのヘルパー ───────────────────── */
 
 /** ネットワークのサイズ = 何段目まで出すか */
 export const DEPTHS: { id: number; label: string; tiers: Tier[] }[] = [
@@ -365,9 +383,9 @@ export function matchesQuery(n: BookNode, q: string): boolean {
 }
 
 
-/* ── フォローの島 ─────────────────────────────────
+/* ── フォローの島 ───────────────────────────────
    自分の全体図はそのまま中央に。フォローしている人の地図は
-   「島」として周縁に常在し、パン／ズームで遊びに行ける。
+   「島」として周縁に常在し、パン／ズームで遗びに行ける。
    図は分ける（島ごとに別ノード）。重なりは島と島の橋で見せる。 */
 
 export interface SocialInput {
@@ -403,7 +421,7 @@ export function attachFollowIslands(base: Graph, input: SocialInput): Graph {
 
   const others = input.accounts.filter((a) => a.id !== input.me.id)
   others.forEach((person, pi) => {
-    // 自分の図（±900）の外側に島を置く
+    // 自分の図（＋900）の外側に島を置く
     const ang = (pi / Math.max(others.length, 1)) * Math.PI * 2 - Math.PI / 2
     const cx = Math.cos(ang) * 1700
     const cy = Math.sin(ang) * 1380
