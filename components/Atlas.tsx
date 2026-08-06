@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  CATEGORIES, DEFAULT_DEPTH, DEPTHS, RELATIONS, baseOpacity, buildGraph, matchesQuery, nodeRadius,
+  CATEGORIES, DEFAULT_DEPTH, DEPTHS, RELATIONS, baseOpacity, buildGraph, buildSocialGraph, matchesQuery, nodeRadius,
   type Category, type Payload, type RelationType, type ShelfOverride, type ViewMode,
 } from '@/lib/graph'
 import { Simulation } from '@/lib/simulation'
 import { fitTransform, hitTest, render, toWorld, type RenderState, type Transform } from '@/lib/render'
 import { getSupabase } from '@/lib/supabase'
-import { EMPTY_OVERLAY, bondPair, fetchOverlay, fetchPersonalView, ndlKey, type NdlItem, type Overlay, type Profile } from '@/lib/overlay'
+import { EMPTY_OVERLAY, bondPair, fetchOverlay, fetchPersonalView, fetchSocial, ndlKey, type NdlItem, type Overlay, type Profile } from '@/lib/overlay'
 import AccountMenu, { type SessionUser } from './AccountMenu'
 import Controls from './Controls'
 import DetailPanel from './DetailPanel'
@@ -79,11 +79,31 @@ export default function Atlas({ payload }: { payload: Payload }) {
 
   const shelfOverride: ShelfOverride =
     viewing && personal ? personal.shelf : user ? (userShelf ?? new Map()) : null
-  const graph = useMemo(
-    () => buildGraph(payload, shelfOverride, effectiveOverlay),
+
+  const [mode, setMode] = useState<ViewMode>('all')
+  const [social, setSocial] = useState<Awaited<ReturnType<typeof fetchSocial>>>(null)
+  useEffect(() => {
+    if (mode !== 'social' || !user) { setSocial(null); return }
+    let on = true
+    fetchSocial(user).then((d) => { if (on) setSocial(d) }).catch(() => {})
+    return () => { on = false }
+  }, [mode, user])
+
+  // 本のタイトル解決（焼き込み + 実体化した本）
+  const titleIndex = useMemo(() => {
+    const m = new Map<string, { title: string; cat: string }>()
+    for (const a of payload.n) m.set(a[11], { title: a[0], cat: payload.C[a[3]] })
+    for (const b of overlay.books) m.set(b.key, { title: b.title, cat: b.cat })
+    return m
+  }, [payload, overlay.books])
+
+  const graph = useMemo(() => {
+    if (mode === 'social' && social) {
+      return buildSocialGraph({ ...social, titles: titleIndex })
+    }
+    return buildGraph(payload, shelfOverride, effectiveOverlay)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [payload, user?.id, userShelf, effectiveOverlay, viewing?.id, personal]
-  )
+  }, [payload, user?.id, userShelf, effectiveOverlay, viewing?.id, personal, mode, social, titleIndex])
 
   // ノードごとの紐付け人数（大きさに反映）
   const boosts = useMemo(() => {
@@ -119,7 +139,6 @@ export default function Atlas({ payload }: { payload: Payload }) {
 
   const [depth, setDepth] = useState(DEFAULT_DEPTH)
   const [nodeScale, setNodeScale] = useState(1)
-  const [mode, setMode] = useState<ViewMode>('all')
   const [edgeTypes, setEdgeTypes] = useState<Set<RelationType>>(new Set(RELATIONS))
   const [categories, setCategories] = useState<Set<Category>>(new Set(CATEGORIES))
   const [query, setQuery] = useState('')
@@ -708,6 +727,11 @@ export default function Atlas({ payload }: { payload: Payload }) {
             onSetTie={setTie}
             onSetBond={setBond}
             onCreateConcept={createConcept}
+            onViewAccount={(id, username) => {
+              setSelected(null)
+              setMode('all')
+              setViewing({ id, username })
+            }}
           />
         )}
       </div>
