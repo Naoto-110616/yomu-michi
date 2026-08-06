@@ -1,16 +1,9 @@
-> **公開まであと1操作**
-> `gh-pages` ブランチにビルド済みの静的サイトが既に入っています。
-> **Settings → Pages → Source を「Deploy from a branch」/ `gh-pages` / `/ (root)` にして Save** すると
-> 下記URLで公開されます。（GITHUB_TOKEN では Pages サイトの新規作成が 403 になるため、ここだけ手動です）
-
 # 読む道 / yomu-michi
 
 **本と本のあいだを地図にする。**
 
 「この本を読む前に、何を読んでおけばいいのか」——歴史や科学の本を読むときに毎回ぶつかるこの問いに、
 線で答えるための地図です。1002冊を **前提 / 発展 / 別視点 / 反論** の4種類の関係でつないでいます。
-
-▶ **https://naoto-110616.github.io/yomu-michi/**
 
 ---
 
@@ -77,6 +70,7 @@ pipeline/
   pack.py            文字列を辞書化して 389KB → 131KB に圧縮
   shelf.py           所有者の本棚93冊（★評価つき）
   sources/*.json     賞・ランキングの生データ（これが真のソース）
+wrangler.jsonc       Cloudflare Workers（静的アセットのみ）の設定
 ```
 
 レイアウトは **Python 側で確定**させて座標ごと配信しています。
@@ -105,17 +99,24 @@ npm run dev          # http://localhost:3000
 
 ## デプロイ
 
-`main` に push すると GitHub Actions が
+配信先は **Cloudflare Workers（静的アセットのみ）**。
+`main` に push すると `.github/workflows/cloudflare.yml` が
 
 1. `pip install numpy` → `npm run data`（グラフ生成）
 2. `npm run build`（`output: 'export'` で静的書き出し）
-3. `gh-pages` ブランチへ配信
+3. `wrangler deploy`（`out/` を Workers のアセットとして配信）
 
-まで自動で行います。初回だけ Settings → Pages で Source を `gh-pages` に指定してください。
+まで自動で行います。必要な GitHub Secrets は `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` の2つ。
+トークンの権限は Workers Scripts (Edit) と Account Settings (Read) で足ります。
 
-Vercel など別のホストに移す場合は、リポジトリを Import して
-`NEXT_PUBLIC_BASE_PATH` を設定しない（＝ルート配信）だけで動きます。
-Build Command に `pip install numpy && npm run data && npm run build` を指定してください。
+手元から直接出す場合は `npm run deploy`（データ生成 → ビルド → `wrangler deploy` を一気に実行）。
+
+`wrangler.jsonc` は Worker スクリプトを持たない構成なので `main` も `assets.binding` も書いていません。
+`not_found_handling` は SPA ではないので `"404-page"`。
+
+GitHub Pages 用の `deploy.yml` も残してあります（`gh-pages` ブランチに同じものを吐きます）。
+そちらを使う場合は Settings → Pages で Source を `gh-pages` にしてください。
+`NEXT_PUBLIC_BASE_PATH` を設定しなければルート配信、設定すればサブパス配信になります。
 
 ## 次のフェーズ
 
