@@ -2,11 +2,11 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "yomu-michi",
   "compatibility_date": "2026-08-05",
-  // Worker スクリプトを持たない「静的アセットのみ」の構成。
-  // main を書かないので assets.binding も不要。
+  // /api/* を担う小さな Worker。静的アセットに一致しないリクエストだけがここに来る
+  "main": "worker/index.ts",
   "assets": {
     "directory": "./out",
-    // 404.html を持つ静的サイトなので SPA モードではなくこちら
+    "binding": "ASSETS",
     "not_found_handling": "404-page"
   },
   "observability": {

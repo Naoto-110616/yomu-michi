@@ -78,8 +78,11 @@ export const TIER_META: Record<Tier, { label: string; scale: number }> = {
 
 export interface BookNode {
   i: number
-  /** 安定キー（正規化タイトル）。アカウントの本棚はこのキーで紐づく */
+  /** 安定キー（正規化タイトル / isbn:xxx）。本棚・紐付けはこのキーで繋がる */
   key: string
+  /** DB から来た動的ノードか（NDL検索で実体化した本・ユーザー概念） */
+  dynamic?: boolean
+  isbn?: string
   kind: NodeKind
   title: string
   author: string
@@ -102,6 +105,8 @@ export interface Edge {
   to: number
   type: RelationType
   why: string
+  /** 紐付けた人数。焼き込みの所属エッジは 1（AIの提案）扱い */
+  weight?: number
 }
 
 export interface Payload {
@@ -133,7 +138,17 @@ export interface Graph {
  */
 export type ShelfOverride = Map<string, number> | null
 
-export function buildGraph(p: Payload, shelfOverride: ShelfOverride = null): Graph {
+export interface GraphOverlay {
+  books: { key: string; title: string; author: string; year: number; cat: string; isbn?: string }[]
+  concepts: { key: string; label: string; description: string; official: boolean }[]
+  links: { concept: string; book: string; supporters: number }[]
+}
+
+export function buildGraph(
+  p: Payload,
+  shelfOverride: ShelfOverride = null,
+  overlay: GraphOverlay | null = null
+): Graph {
   const nodes: BookNode[] = p.n.map((a, i) => {
     const key = a[11]
     const kind = (p.K?.[a[9]] as NodeKind) ?? 'book'
@@ -159,12 +174,81 @@ export function buildGraph(p: Payload, shelfOverride: ShelfOverride = null): Gra
     }
   })
 
+  const byKey = new Map(nodes.map((n) => [n.key, n]))
+
   const edges: Edge[] = p.e.map((e) => ({
     from: e[0],
     to: e[1],
     type: (p.T[e[2]] as RelationType) ?? 'alt',
     why: p.W[e[3]] ?? '',
+    weight: 1,
   }))
+
+  if (overlay) {
+    // 焼き込みに無い動的ノードを追加（配置はライブ物理に任せるので座標はゼロ近傍でよい）
+    const addNode = (partial: Omit<BookNode, 'i' | 'degree' | 'tier' | 'x' | 'y' | 'sources'>) => {
+      const node: BookNode = {
+        ...partial,
+        i: nodes.length,
+        x: (Math.random() - 0.5) * 120,
+        y: (Math.random() - 0.5) * 120,
+        sources: [],
+        degree: 0,
+        tier: 'far',
+      }
+      nodes.push(node)
+      byKey.set(node.key, node)
+      return node
+    }
+    for (const c of overlay.concepts) {
+      if (byKey.has(c.key)) continue
+      addNode({
+        key: c.key, dynamic: true, kind: 'concept', title: c.label, author: '',
+        desc: c.description, year: 0, cat: 'phil' as Category, star: null, shelf: false,
+      })
+    }
+    for (const b of overlay.books) {
+      if (byKey.has(b.key)) continue
+      const star = shelfOverride?.has(b.key) ? (shelfOverride.get(b.key) ?? 0) : null
+      addNode({
+        key: b.key, dynamic: true, isbn: b.isbn, kind: 'book', title: b.title, author: b.author,
+        desc: '', year: b.year, cat: (b.cat as Category) ?? 'lit',
+        star, shelf: shelfOverride?.has(b.key) ?? false,
+      })
+    }
+    // 紐付け（投票）を所属エッジに反映。既存エッジは重みを上書き、無ければ新設
+    const edgeIndex = new Map<string, Edge>()
+    for (const e of edges) {
+      if (e.type === 'member') edgeIndex.set(`${nodes[e.from].key}::${nodes[e.to].key}`, e)
+    }
+    for (const l of overlay.links) {
+      const c = byKey.get(l.concept)
+      const b = byKey.get(l.book)
+      if (!c || !b) continue
+      const existing = edgeIndex.get(`${l.concept}::${l.book}`)
+      if (existing) {
+        existing.weight = (existing.weight ?? 1) + l.supporters
+        existing.why = `${l.supporters}人が紐付け`
+      } else {
+        edges.push({
+          from: c.i, to: b.i, type: 'member',
+          why: `${l.supporters}人が紐付け`, weight: l.supporters,
+        })
+      }
+    }
+    // 動的概念ノードの初期位置は、紐付いた本の重心の近くへ
+    for (const n of nodes) {
+      if (!n.dynamic) continue
+      const linked = overlay.links.filter((l) => l.concept === n.key || l.book === n.key)
+      const anchors = linked
+        .map((l) => byKey.get(l.concept === n.key ? l.book : l.concept))
+        .filter((a): a is BookNode => !!a && !a.dynamic)
+      if (anchors.length) {
+        n.x = anchors.reduce((s2, a) => s2 + a.x, 0) / anchors.length + (Math.random() - 0.5) * 60
+        n.y = anchors.reduce((s2, a) => s2 + a.y, 0) / anchors.length + (Math.random() - 0.5) * 60
+      }
+    }
+  }
 
   const adjacency: number[][] = nodes.map(() => [])
   edges.forEach((e, i) => {
@@ -207,12 +291,13 @@ export const DEPTHS: { id: number; label: string; tiers: Tier[] }[] = [
 ]
 export const DEFAULT_DEPTH = 2
 
-export function nodeRadius(n: BookNode, scale = 1): number {
+export function nodeRadius(n: BookNode, scale = 1, boost = 0): number {
   const base =
     n.kind === 'concept' ? 13 + Math.min(n.degree, 12) * 0.45
     : n.shelf ? (n.star ? 4 + n.star * 1.4 : 5.5)
     : 2.4 + Math.min(n.degree, 8) * 0.42
-  return base * scale
+  // boost = そのノードに集まった紐付け人数。多いほど育つ（対数で頭打ち）
+  return (base + Math.log2(1 + boost) * 2.2) * scale
 }
 
 export type ViewMode = 'all' | 'shelf' | 'human'
