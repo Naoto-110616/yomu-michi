@@ -78,6 +78,8 @@ export const TIER_META: Record<Tier, { label: string; scale: number }> = {
 
 export interface BookNode {
   i: number
+  /** 安定キー（正規化タイトル）。アカウントの本棚はこのキーで紐づく */
+  key: string
   kind: NodeKind
   title: string
   author: string
@@ -110,7 +112,7 @@ export interface Payload {
   S: string[]
   W: string[]
   D: string[]
-  n: [string, number, number, number, number, number, number, number, number[], number, number][]
+  n: [string, number, number, number, number, number, number, number, number[], number, number, string][]
   e: [number, number, number, number][]
   meta: { nodes: number; edges: number; shelf: number; byType: Record<string, number>; raw: number }
 }
@@ -123,23 +125,39 @@ export interface Graph {
   concepts: number[]
 }
 
-export function buildGraph(p: Payload): Graph {
-  const nodes: BookNode[] = p.n.map((a, i) => ({
-    i,
-    kind: (p.K?.[a[9]] as NodeKind) ?? 'book',
-    title: a[0],
-    author: p.A[a[1]] ?? '',
-    desc: a[10] >= 0 ? (p.D?.[a[10]] ?? '') : '',
-    year: a[2],
-    cat: (p.C[a[3]] as Category) ?? 'lit',
-    star: a[4] < 0 ? null : a[4],
-    shelf: !!a[5],
-    x: a[6],
-    y: a[7],
-    sources: (a[8] ?? []).map((j) => p.S[j]).filter(Boolean),
-    degree: 0,
-    tier: 'far',
-  }))
+/**
+ * shelfOverride:
+ *   null      → 焼き込みの本棚（ゲスト表示 = 尚斗の93冊）
+ *   Map       → ログイン中アカウントの本棚。key → ★（0 = 未評価）。
+ *               空の Map なら「まだ1冊も読んでいないアカウント」として描く。
+ */
+export type ShelfOverride = Map<string, number> | null
+
+export function buildGraph(p: Payload, shelfOverride: ShelfOverride = null): Graph {
+  const nodes: BookNode[] = p.n.map((a, i) => {
+    const key = a[11]
+    const kind = (p.K?.[a[9]] as NodeKind) ?? 'book'
+    const useOverride = shelfOverride !== null && kind === 'book'
+    return {
+      i,
+      key,
+      kind,
+      title: a[0],
+      author: p.A[a[1]] ?? '',
+      desc: a[10] >= 0 ? (p.D?.[a[10]] ?? '') : '',
+      year: a[2],
+      cat: (p.C[a[3]] as Category) ?? 'lit',
+      star: useOverride
+        ? (shelfOverride.has(key) ? (shelfOverride.get(key) ?? 0) : null)
+        : a[4] < 0 ? null : a[4],
+      shelf: useOverride ? shelfOverride.has(key) : !!a[5],
+      x: a[6],
+      y: a[7],
+      sources: (a[8] ?? []).map((j) => p.S[j]).filter(Boolean),
+      degree: 0,
+      tier: 'far' as Tier,
+    }
+  })
 
   const edges: Edge[] = p.e.map((e) => ({
     from: e[0],
@@ -156,7 +174,7 @@ export function buildGraph(p: Payload): Graph {
     nodes[e.to].degree++
   })
 
-  // ── 階層を決める ──────────────────────────────
+  // ── 階層を決める ─────────────────────────
   // 概念 → 読んだ本 → そのどちらかに1ホップで繋がる本 → それ以外
   const core = new Set<number>()
   nodes.forEach((n) => {
@@ -178,7 +196,7 @@ export function buildGraph(p: Payload): Graph {
   }
 }
 
-/* ── 表示のためのヘルパー ───────────────────────── */
+/* ── 表示のためのヘルパー ────────────────────── */
 
 /** ネットワークのサイズ = 何段目まで出すか */
 export const DEPTHS: { id: number; label: string; tiers: Tier[] }[] = [
