@@ -161,7 +161,8 @@ export default function Controls(props: {
         })}
       </div>
 
-      <p className="mb-1.5 text-[10px] tracking-[0.09em] text-dim">領域</p>
+      {/* 領域 = 機械が1冊に1つ割り当てる「色分け」。投票で育つ「概念」とは別物 */}
+      <p className="mb-1.5 text-[10px] tracking-[0.09em] text-dim">領域 — 色分け（自動・1冊1つ）</p>
       <div className="mb-3 flex flex-wrap gap-1.5">
         {CATEGORIES.map((c) => (
           <Chip
