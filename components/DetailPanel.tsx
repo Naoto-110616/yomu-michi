@@ -54,7 +54,7 @@ function RelList({ items, nodes, onSelect }: { items: Rel[]; nodes: BookNode[]; 
 
 export default function DetailPanel({
   node, nodes, incoming, outgoing, canRate, onRate, onSelect, onClose,
-  chips, bonds, allConcepts, onSetTie, onSetBond, onCreateConcept,
+  chips, bonds, shelfBooks, linkedBookKeys, allConcepts, onSetTie, onSetBond, onCreateConcept,
 }: {
   node: BookNode
   nodes: BookNode[]
@@ -67,6 +67,10 @@ export default function DetailPanel({
   /** この本に付いている概念（投票数つき） */
   chips: ConceptChip[]
   bonds: BondChip[]
+  /** 自分の本棚（概念側から紐付ける候補 = 読んだことがある本だけ） */
+  shelfBooks: { key: string; title: string }[]
+  /** この概念に既に紐付いている本のキー */
+  linkedBookKeys: Set<string>
   /** 紐付け候補（公式 + ユーザー概念） */
   allConcepts: { key: string; label: string }[]
   onSetTie: (conceptKey: string, bookKey: string, strength: number | null) => void
@@ -90,7 +94,12 @@ export default function DetailPanel({
       {!isConcept && <Cover node={node} />}
       <h2 className="m-0 mb-1 pr-4 text-[15px] leading-[1.45]">{node.title}</h2>
       {isConcept ? (
-        <p className="m-0 mb-2 text-[12px] leading-[1.75] text-[#c3c9d2]">{node.desc}</p>
+        <>
+          <p className="m-0 mb-2 text-[12px] leading-[1.75] text-[#c3c9d2]">{node.desc}</p>
+          {canRate && (
+            <ConceptLinker node={node} shelfBooks={shelfBooks} linked={linkedBookKeys} onSetTie={onSetTie} />
+          )}
+        </>
       ) : (
         <>
           <p className="m-0 mb-2 text-[11.5px] text-muted">
@@ -291,7 +300,67 @@ function ConceptChips({
   )
 }
 
-/* ── 本と本の結びつき ─────────────────────────────── */
+/* ── 概念側からの紐付け（候補 = 読んだことがある本） ─────── */
+
+function ConceptLinker({
+  node, shelfBooks, linked, onSetTie,
+}: {
+  node: BookNode
+  shelfBooks: { key: string; title: string }[]
+  linked: Set<string>
+  onSetTie: (conceptKey: string, bookKey: string, strength: number | null) => void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [q, setQ] = useState('')
+  const [strength, setStrength] = useState(3)
+  const candidates = shelfBooks
+    .filter((b) => !linked.has(b.key))
+    .filter((b) => !q || b.title.toLowerCase().includes(q.toLowerCase()))
+    .slice(0, 8)
+  return (
+    <div className="mb-2">
+      {!adding ? (
+        <button
+          onClick={() => setAdding(true)}
+          className="rounded-full border border-dashed border-[#3b3357] px-2.5 py-[4px] text-[11px] text-[#c4b5fd] active:bg-[#a78bfa]/15"
+        >
+          ＋ 読んだ本から紐付ける
+        </button>
+      ) : (
+        <div className="rounded-[10px] border border-line bg-panel2 p-2">
+          <input
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="自分の本棚から検索…"
+            className="mb-1.5 w-full appearance-none rounded-lg border border-line bg-panel px-2 py-1.5 text-[12px] text-text outline-none placeholder:text-dim"
+          />
+          <div className="mb-1.5 flex items-center gap-1.5 text-[10.5px] text-dim">
+            強さ
+            <StarStrength value={strength} onPick={(st) => setStrength(st ?? 3)} />
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {candidates.length === 0 && (
+              <span className="text-[11px] text-dim">候補なし（読んだ本だけが候補になります）</span>
+            )}
+            {candidates.map((b) => (
+              <button
+                key={b.key}
+                onClick={() => { onSetTie(node.key, b.key, strength); setQ('') }}
+                className="rounded-full border border-[#3b3357] bg-[#a78bfa]/10 px-2 py-[3px] text-[11px] text-[#c4b5fd]"
+              >
+                {b.title.length > 14 ? b.title.slice(0, 13) + '…' : b.title}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => { setAdding(false); setQ('') }} className="mt-1 text-[10px] text-dim">閉じる</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── 本と本の結びつき ──────────────────────────── */
 
 function BondChips({
   node, nodes, bonds, canRate, onSetBond, onSelect,

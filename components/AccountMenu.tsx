@@ -10,7 +10,7 @@ export interface SessionUser {
 }
 
 export default function AccountMenu({
-  user, shelfCount, profiles, follows, viewingId, onToggleFollow, onView,
+  user, shelfCount, profiles, follows, viewingId, onToggleFollow, onView, onImportSample,
 }: {
   user: SessionUser | null
   shelfCount: number | null
@@ -19,8 +19,11 @@ export default function AccountMenu({
   viewingId: string | null
   onToggleFollow: (profileId: string, on: boolean) => void
   onView: (p: Profile) => void
+  onImportSample: () => Promise<number>
 }) {
   const [open, setOpen] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [imported, setImported] = useState<number | null>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -68,9 +71,22 @@ export default function AccountMenu({
           {user ? (
             <>
               <p className="m-0 mb-0.5 text-[12.5px] font-semibold">{user.email}</p>
-              <p className="m-0 mb-3 text-[11px] text-muted">
+              <p className="m-0 mb-2 text-[11px] text-muted">
                 本棚 {shelfCount ?? '…'} 冊 — 地図はこのアカウントの本棚で描かれています
               </p>
+              <button
+                disabled={importing}
+                onClick={async () => {
+                  setImporting(true)
+                  setImported(await onImportSample())
+                  setImporting(false)
+                }}
+                className="mb-2.5 w-full rounded-lg border border-[#8a6d1f] bg-[#fbbf24]/10 py-2 text-[12px] text-[#fcd34d] active:bg-[#fbbf24]/20 disabled:opacity-50"
+              >
+                {importing ? '取り込み中…' : imported !== null
+                  ? `ブクログの${imported}冊を取り込みました`
+                  : 'ブクログの本棚（93冊）をワンタップで再現'}
+              </button>
               {profiles.filter((p) => p.id !== user.id).length > 0 && (
                 <>
                   <p className="m-0 mb-1 text-[10px] tracking-[0.08em] text-dim">アカウント同士の紐付き</p>
