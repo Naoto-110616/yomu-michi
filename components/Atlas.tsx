@@ -3,17 +3,66 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CATEGORIES, DEFAULT_DEPTH, DEPTHS, RELATIONS, baseOpacity, buildGraph, matchesQuery, nodeRadius,
-  type Category, type Payload, type RelationType, type ViewMode,
+  type Category, type Payload, type RelationType, type ShelfOverride, type ViewMode,
 } from '@/lib/graph'
 import { Simulation } from '@/lib/simulation'
 import { fitTransform, hitTest, render, toWorld, type RenderState, type Transform } from '@/lib/render'
+import { getSupabase } from '@/lib/supabase'
+import AccountMenu, { type SessionUser } from './AccountMenu'
 import Controls from './Controls'
 import DetailPanel from './DetailPanel'
 import Legend from './Legend'
 
+/** タップとドラッグの境界（px）。これ未満の移動はクリック扱いで、物理は一切動かさない */
+const DRAG_THRESHOLD = 4
+
 export default function Atlas({ payload }: { payload: Payload }) {
-  const graph = useMemo(() => buildGraph(payload), [payload])
-  const sim = useMemo(() => new Simulation(graph), [graph])
+  /* ── アカウント & 本棚 ─────────────────────
+     未ログイン: 焼き込みの本棚（サンプル93冊）で描く。
+     ログイン中: そのアカウントの shelf テーブルの中身で描く。 */
+  const [user, setUser] = useState<SessionUser | null>(null)
+  const [userShelf, setUserShelf] = useState<Map<string, number> | null>(null)
+
+  useEffect(() => {
+    const sb = getSupabase()
+    if (!sb) return
+    sb.auth.getSession().then(({ data }) => {
+      const u = data.session?.user
+      setUser(u ? { id: u.id, email: u.email ?? '' } : null)
+    })
+    const { data: sub } = sb.auth.onAuthStateChange((_event, session) => {
+      const u = session?.user
+      setUser(u ? { id: u.id, email: u.email ?? '' } : null)
+    })
+    return () => sub.subscription.unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    const sb = getSupabase()
+    if (!sb || !user) { setUserShelf(null); return }
+    let on = true
+    sb.from('shelf').select('book_key, star').then(({ data, error }) => {
+      if (!on) return
+      if (error) { setUserShelf(new Map()); return }
+      setUserShelf(new Map((data ?? []).map((r) => [r.book_key as string, r.star as number])))
+    })
+    return () => { on = false }
+  }, [user])
+
+  const shelfOverride: ShelfOverride = user ? (userShelf ?? new Map()) : null
+  const graph = useMemo(
+    () => buildGraph(payload, shelfOverride),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [payload, user?.id, userShelf]
+  )
+
+  // グラフを作り直しても、前のシミュレーションから位置を引き継ぐ（★を付けても地図が飛ばない）
+  const prevSim = useRef<Simulation | null>(null)
+  const sim = useMemo(() => {
+    const s = new Simulation(graph, prevSim.current ?? undefined)
+    prevSim.current = s
+    return s
+  }, [graph])
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -45,9 +94,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     ...filters.current,
   }), [graph, sim])
 
-  /* ── 描画ループ ──────────────────────────────
-     sim.step() が false を返したら止め、操作があれば再開する。
-     止まっている間は 1 フレームも回さないのでバッテリーを食わない。 */
+  /* ── 描画ループ。sim が「もう動かない」と言ったら完全に止まる ── */
   const raf = useRef<number | null>(null)
   const loop = useCallback(() => {
     const moving = sim.step()
@@ -67,9 +114,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     if (ctx && s.width > 0) render(ctx, s)
   }, [snapshot])
 
-  /* ── サイズ追従 ──────────────────────────────
-     絞り込みパネルの開閉でグラフ領域の高さが変わる。window の resize は
-     発火しないので ResizeObserver で要素そのものを見る。 */
+  /* ── サイズ追従（絞り込みパネル開閉に ResizeObserver で追従） ── */
   useEffect(() => {
     const el = wrapRef.current
     const cv = canvasRef.current
@@ -83,7 +128,6 @@ export default function Atlas({ payload }: { payload: Payload }) {
       size.current = { w, h, dpr }
       cv.width = Math.round(w * dpr)
       cv.height = Math.round(h * dpr)
-      // 表示領域が変わっても、見ている中心がずれないように平行移動で補正する
       if (prev.w > 0) {
         transform.current = {
           ...transform.current,
@@ -109,8 +153,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
       if (mode === 'shelf' && n.kind !== 'concept' && !n.shelf) return
       nodeIds.add(n.i)
     })
-    // 選択中のノードとその隣接は、サイズ設定に関係なく必ず出す。
-    // 「概念だけ」表示のまま概念を押すと、その概念に属する本だけが現れる。
+    // 選択中のノードとその隣接は、サイズ設定に関係なく必ず出す
     if (selected !== null) {
       nodeIds.add(selected)
       for (const ei of graph.adjacency[selected]) {
@@ -121,7 +164,6 @@ export default function Atlas({ payload }: { payload: Payload }) {
         nodeIds.add(e.to)
       }
     }
-
     const eids: number[] = []
     graph.edges.forEach((e, i) => {
       if (!edgeTypes.has(e.type)) return
@@ -135,7 +177,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     kick()
   }, [graph, sim, depth, categories, edgeTypes, mode, nodeScale, selected, kick])
 
-  /* ── 強調の目標値。selected / hovered / 検索で滑らかに切り替わる ── */
+  /* ── 強調（不透明度の目標値）。物理は動かさない ── */
   useEffect(() => {
     const focus = selected ?? hovered
     let near: Set<number> | null = null
@@ -148,7 +190,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
         near.add(e.to)
       }
     }
-    sim.setAlphaTargets((i) => {
+    sim.setFadeTargets((i) => {
       const n = graph.nodes[i]
       if (query && !matchesQuery(n, query)) return 0.05
       if (near && !near.has(i)) return 0.05
@@ -159,7 +201,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
 
   useEffect(() => () => { if (raf.current) cancelAnimationFrame(raf.current) }, [])
 
-  /* ── 選択したら周辺へ寄せる ───────────────── */
+  /* ── カメラ ─────────────────────────────── */
   const anim = useRef<number | null>(null)
   const focusOn = useCallback((ids: Iterable<number>) => {
     const mobile = size.current.w <= 640
@@ -184,13 +226,12 @@ export default function Atlas({ payload }: { payload: Payload }) {
     anim.current = requestAnimationFrame(step)
   }, [snapshot, paintOnce])
 
+  // 選択は物理に触らない（触ると揺れる）。カメラと強調だけ動かす
   const select = useCallback((i: number | null) => {
     setSelected((prev) => (i !== null && prev !== i ? i : null))
-    sim.reheat(0.6)
     kick()
-  }, [sim, kick])
+  }, [kick])
 
-  // 表示対象・強調の更新が終わったあとにカメラを寄せる（宣言順に依存）
   useEffect(() => {
     if (selected === null) return
     const ids = new Set<number>([selected])
@@ -204,12 +245,16 @@ export default function Atlas({ payload }: { payload: Payload }) {
     return () => clearTimeout(t)
   }, [selected, graph, sim, edgeTypes, focusOn])
 
-  /* ── ポインタ操作 ───────────────────────── */
+  /* ── ポインタ操作 ──────────────────────────
+     ノードの上で押しても、DRAG_THRESHOLD を超えるまではドラッグを開始しない。
+     タップ（クリック）で物理が動くと「触るたびに震える」ため。 */
   useEffect(() => {
     const cv = canvasRef.current
     if (!cv) return
     const ptrs = new Map<number, { x: number; y: number }>()
-    let mode2: 'none' | 'pan' | 'node' = 'none'
+    let pending: number | null = null   // 押したノード（まだドラッグではない）
+    let dragging = false                // sim.startDrag 済みか
+    let panning = false
     let last = { x: 0, y: 0 }
     let moved = false
     let pinch: { d: number; k: number; w: { x: number; y: number } } | null = null
@@ -225,25 +270,19 @@ export default function Atlas({ payload }: { payload: Payload }) {
           k: transform.current.k,
           w: toWorld(transform.current, (a.x + b.x) / 2, (a.y + b.y) / 2),
         }
-        if (mode2 === 'node') sim.endDrag()
-        mode2 = 'none'
+        if (dragging) { sim.endDrag(); dragging = false }
+        pending = null
+        panning = false
         return
       }
-      const hit = hitTest(snapshot(), e.offsetX, e.offsetY)
-      if (hit !== null) {
-        mode2 = 'node'
-        sim.startDrag(hit)
-        kick()
-      } else {
-        mode2 = 'pan'
-      }
+      pending = hitTest(snapshot(), e.offsetX, e.offsetY)
+      panning = pending === null
       last = { x: e.offsetX, y: e.offsetY }
     }
 
     const move = (e: PointerEvent) => {
       if (!ptrs.has(e.pointerId)) {
-        // ホバー（マウスのみ）
-        if (e.pointerType === 'mouse' && mode2 === 'none') {
+        if (e.pointerType === 'mouse' && !dragging && !panning) {
           const h = hitTest(snapshot(), e.offsetX, e.offsetY)
           setHovered((prev) => (prev === h ? prev : h))
         }
@@ -264,16 +303,22 @@ export default function Atlas({ payload }: { payload: Payload }) {
         paintOnce()
         return
       }
+
       const dx = e.offsetX - last.x
       const dy = e.offsetY - last.y
-      if (Math.abs(dx) + Math.abs(dy) > 3) moved = true
+      if (Math.abs(dx) + Math.abs(dy) > DRAG_THRESHOLD) moved = true
       last = { x: e.offsetX, y: e.offsetY }
 
-      if (mode2 === 'node') {
+      if (pending !== null && moved && !dragging) {
+        dragging = true
+        sim.startDrag(pending)
+        kick()
+      }
+      if (dragging) {
         const w = toWorld(transform.current, e.offsetX, e.offsetY)
         sim.moveDrag(w.x, w.y)
         kick()
-      } else if (mode2 === 'pan') {
+      } else if (panning && moved) {
         transform.current = {
           ...transform.current,
           x: transform.current.x + dx,
@@ -284,20 +329,22 @@ export default function Atlas({ payload }: { payload: Payload }) {
     }
 
     const up = (e: PointerEvent) => {
-      const tapped = !moved ? { x: e.offsetX, y: e.offsetY } : null
-      const wasNode = mode2 === 'node' ? sim.dragging : -1
+      const tappedNode = !moved ? pending : null
+      const tappedEmpty = !moved && pending === null
       ptrs.delete(e.pointerId)
       if (ptrs.size < 2) pinch = null
-      if (mode2 === 'node') sim.endDrag()
-      mode2 = 'none'
-      kick()
-      if (tapped) select(wasNode >= 0 ? wasNode : hitTest(snapshot(), tapped.x, tapped.y))
+      if (dragging) { sim.endDrag(); dragging = false; kick() }
+      pending = null
+      panning = false
+      if (tappedNode !== null) select(tappedNode)
+      else if (tappedEmpty) select(null)
     }
 
     const cancel = (e: PointerEvent) => {
       ptrs.delete(e.pointerId)
-      if (mode2 === 'node') sim.endDrag()
-      mode2 = 'none'
+      if (dragging) { sim.endDrag(); dragging = false }
+      pending = null
+      panning = false
       pinch = null
     }
 
@@ -328,18 +375,39 @@ export default function Atlas({ payload }: { payload: Payload }) {
   }, [sim, snapshot, select, kick, paintOnce])
 
   /* ── 初期表示 ───────────────────────────── */
+  const didFit = useRef(false)
   useEffect(() => {
+    if (didFit.current) return
     const t = setTimeout(() => {
       if (!sim.activeList.length || size.current.w === 0) return
       transform.current = fitTransform(snapshot(), sim.activeList, { panelSide: 'none', panelSize: 0 })
+      didFit.current = true
       paintOnce()
     }, 60)
     return () => clearTimeout(t)
-    // 初回のみ
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [sim, snapshot, paintOnce])
 
-  /* ── 詳細パネル用の関係リスト ─────────────── */
+  /* ── ★を付ける（ログイン中のみ） ─────────── */
+  const rate = useCallback(async (key: string, star: number | null) => {
+    const sb = getSupabase()
+    if (!sb || !user) return
+    // 楽観更新 → 失敗したら再取得
+    setUserShelf((prev) => {
+      const next = new Map(prev ?? [])
+      if (star === null) next.delete(key)
+      else next.set(key, star)
+      return next
+    })
+    const res = star === null
+      ? await sb.from('shelf').delete().eq('user_id', user.id).eq('book_key', key)
+      : await sb.from('shelf').upsert({ user_id: user.id, book_key: key, star })
+    if (res.error) {
+      const { data } = await sb.from('shelf').select('book_key, star')
+      setUserShelf(new Map((data ?? []).map((r) => [r.book_key as string, r.star as number])))
+    }
+  }, [user])
+
+  /* ── 詳細パネル用 ─────────────────────────── */
   const relations = useMemo(() => {
     if (selected === null) return null
     const incoming: { node: number; type: RelationType; why: string }[] = []
@@ -348,9 +416,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
       const e = graph.edges[ei]
       if (!edgeTypes.has(e.type)) continue
       const isIn = e.to === selected
-      ;(isIn ? incoming : outgoing).push({
-        node: isIn ? e.from : e.to, type: e.type, why: e.why,
-      })
+      ;(isIn ? incoming : outgoing).push({ node: isIn ? e.from : e.to, type: e.type, why: e.why })
     }
     return { incoming, outgoing }
   }, [selected, graph, edgeTypes])
@@ -380,14 +446,17 @@ export default function Atlas({ payload }: { payload: Payload }) {
           読む道 <span className="text-acc">/ Atlas</span>
         </h1>
         <p className="truncate text-[10.5px] text-dim">
-          概念{graph.concepts.length} ・ 表示中 {visibleCount} / {graph.meta.nodes}
+          {user ? `${user.email.split('@')[0]} の本棚` : 'サンプル本棚'} ・ 表示中 {visibleCount} / {graph.meta.nodes}
         </p>
-        <button
-          onClick={() => setControlsOpen((v) => !v)}
-          className="ml-auto flex-none rounded-lg border border-line bg-panel2 px-2.5 py-1.5 text-[11px] text-muted active:text-text"
-        >
-          絞り込み {controlsOpen ? '▴' : '▾'}
-        </button>
+        <div className="ml-auto flex flex-none items-center gap-1.5">
+          <AccountMenu user={user} shelfCount={user ? (userShelf?.size ?? null) : null} />
+          <button
+            onClick={() => setControlsOpen((v) => !v)}
+            className="rounded-lg border border-line bg-panel2 px-2.5 py-1.5 text-[11px] text-muted active:text-text"
+          >
+            絞り込み {controlsOpen ? '▴' : '▾'}
+          </button>
+        </div>
       </header>
 
       <Controls
@@ -419,6 +488,8 @@ export default function Atlas({ payload }: { payload: Payload }) {
             nodes={graph.nodes}
             incoming={relations.incoming}
             outgoing={relations.outgoing}
+            canRate={!!user}
+            onRate={rate}
             onSelect={select}
             onClose={() => setSelected(null)}
           />
