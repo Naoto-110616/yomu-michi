@@ -47,7 +47,7 @@ describe('buildGraph: オーバーレイ（動的ノード + 紐付けの重み�
       { concept: 'u_new', book: 'isbn:9999', supporters: 2, strength: 2 },  // 新しい枝
     ],
     bonds: [
-      { a: 'book_a', b: 'book_b', supporters: 1, strength: 5 }, // 本と本の結びつき
+      { from: 'book_c', to: 'book_a', rel: 'pre' as const, supporters: 1, strength: 5 }, // Cを先に読むとAが効く
     ],
   }
 
@@ -69,13 +69,28 @@ describe('buildGraph: オーバーレイ（動的ノード + 紐付けの重み�
     expect(g.nodes[created!.to].key).toBe('isbn:9999')
   })
 
-  it('本と本の結びつき（bond）エッジが平均強度つきで作られる', () => {
+  it('本と本の紐付けが関係タイプそのもののエッジとして作られる', () => {
     const g = buildGraph(tinyPayload(), null, overlay)
-    const bond = g.edges.find((e) => e.type === 'bond')
+    const bond = g.edges.find((e) => e.supporters === 1 && e.type === 'pre' && e.weight === 5)
     expect(bond).toBeDefined()
-    expect(bond?.weight).toBe(5)
-    expect(g.nodes[bond!.from].key).toBe('book_a')
-    expect(g.nodes[bond!.to].key).toBe('book_b')
+    expect(g.nodes[bond!.from].key).toBe('book_c')
+    expect(g.nodes[bond!.to].key).toBe('book_a')
+  })
+
+  it('後から実体化した本は同じ著者・同シリーズに自動接続される', () => {
+    const ov = {
+      books: [
+        { key: 'isbn:1', title: '新しい本', author: '著者A', year: 2026, cat: 'mys' },
+        { key: 'isbn:2', title: '読了本A 2', author: '著者A', year: 2026, cat: 'mys' },
+      ],
+      concepts: [], links: [], bonds: [],
+    }
+    const g = buildGraph(tinyPayload(), null, ov)
+    const auto = g.edges.filter((e) => e.why.includes('自動接続'))
+    // 著者A の既存本(読了本A,読了本B) × 新規2冊 → 同著者エッジ + シリーズ判定
+    expect(auto.length).toBeGreaterThanOrEqual(3)
+    const series = auto.find((e) => e.type === 'next' && g.nodes[e.to].key === 'isbn:2')
+    expect(series).toBeDefined() // 「読了本A 2」は「読了本A」のシリーズ扱い
   })
 })
 

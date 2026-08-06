@@ -29,8 +29,9 @@ export interface OverlayLink {
   strength: number
 }
 export interface OverlayBond {
-  a: string
-  b: string
+  from: string
+  to: string
+  rel: 'pre' | 'next' | 'alt' | 'counter'
   supporters: number
   strength: number
 }
@@ -61,12 +62,12 @@ export async function fetchOverlay(userId: string | null): Promise<Overlay> {
   if (!sb) return EMPTY_OVERLAY
   const [strength, bonds, concepts, books, profiles, mineLinks, mineBonds, follows] = await Promise.all([
     sb.from('concept_link_strength').select('concept_key, book_key, supporters, strength'),
-    sb.from('book_link_strength').select('a_key, b_key, supporters, strength'),
+    sb.from('book_link_strength').select('from_key, to_key, rel, supporters, strength'),
     sb.from('concepts').select('key, label, description, official'),
     sb.from('books').select('key, title, author, year, cat, isbn'),
     sb.from('profiles').select('id, username'),
     userId ? sb.from('concept_links').select('concept_key, book_key, strength').eq('user_id', userId) : Promise.resolve({ data: [] }),
-    userId ? sb.from('book_links').select('a_key, b_key, strength').eq('user_id', userId) : Promise.resolve({ data: [] }),
+    userId ? sb.from('book_links').select('from_key, to_key, rel, strength').eq('user_id', userId) : Promise.resolve({ data: [] }),
     userId ? sb.from('follows').select('followee').eq('follower', userId) : Promise.resolve({ data: [] }),
   ])
   type Row = Record<string, unknown>
@@ -74,14 +75,15 @@ export async function fetchOverlay(userId: string | null): Promise<Overlay> {
   for (const r of ((mineLinks as { data: Row[] | null }).data ?? []))
     mine.set(`${r.concept_key}::${r.book_key}`, Number(r.strength ?? 3))
   for (const r of ((mineBonds as { data: Row[] | null }).data ?? []))
-    mine.set(`${r.a_key}::${r.b_key}`, Number(r.strength ?? 3))
+    mine.set(`${r.from_key}::${r.to_key}::${r.rel}`, Number(r.strength ?? 3))
   return {
     links: (strength.data ?? []).map((r) => ({
       concept: r.concept_key as string, book: r.book_key as string,
       supporters: r.supporters as number, strength: Number(r.strength ?? 3),
     })),
     bonds: (bonds.data ?? []).map((r) => ({
-      a: r.a_key as string, b: r.b_key as string,
+      from: r.from_key as string, to: r.to_key as string,
+      rel: r.rel as OverlayBond['rel'],
       supporters: r.supporters as number, strength: Number(r.strength ?? 3),
     })),
     concepts: (concepts.data ?? []).map((r) => ({
@@ -106,7 +108,7 @@ export async function fetchPersonalView(userId: string) {
   const [shelf, links, bonds] = await Promise.all([
     sb.from('shelf').select('book_key, star').eq('user_id', userId),
     sb.from('concept_links').select('concept_key, book_key, strength').eq('user_id', userId),
-    sb.from('book_links').select('a_key, b_key, strength').eq('user_id', userId),
+    sb.from('book_links').select('from_key, to_key, rel, strength').eq('user_id', userId),
   ])
   return {
     shelf: new Map((shelf.data ?? []).map((r) => [r.book_key as string, r.star as number])),
@@ -115,7 +117,8 @@ export async function fetchPersonalView(userId: string) {
       supporters: 1, strength: Number(r.strength ?? 3),
     })),
     bonds: (bonds.data ?? []).map((r) => ({
-      a: r.a_key as string, b: r.b_key as string,
+      from: r.from_key as string, to: r.to_key as string,
+      rel: r.rel as OverlayBond['rel'],
       supporters: 1, strength: Number(r.strength ?? 3),
     })),
   }
