@@ -45,7 +45,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   const k = Math.max(T.k, 0.25)
   const focus = s.selected ?? s.hovered
 
-  // ── エッジ ───────────────────────
+  // ── エッジ ─────────────────────────────
   for (const ei of s.visibleEdges) {
     const e = graph.edges[ei]
     if (!e) continue // グラフ再構築の瞬間に古いインデックスが混ざっても落とさない
@@ -90,7 +90,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     }
   }
 
-  // ── ノード ───────────────────────
+  // ── ノード ─────────────────────────────
   for (const i of sim.activeList) {
     const n = graph.nodes[i]
     const a = fade[i]
@@ -140,7 +140,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     }
   }
 
-  // ── ラベル（優先度順・衝突したら捨てる）──────
+  // ── ラベル（優先度順・衝突したら捨てる）──────────
   const boxes: [number, number, number, number][] = []
   const free = (a: number, b: number, c: number, d: number) => {
     for (const r of boxes) if (a < r[2] && c > r[0] && b < r[3] && d > r[1]) return false
@@ -190,7 +190,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   ctx.globalAlpha = 1
 }
 
-/* ── 座標変換 / ヒットテスト ────────────────── */
+/* ── 座標変換 / ヒットテスト ───────────────────────── */
 
 export const toWorld = (T: Transform, sx: number, sy: number) => ({
   x: (sx - T.x) / T.k,
