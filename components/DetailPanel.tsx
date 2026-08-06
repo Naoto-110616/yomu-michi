@@ -54,7 +54,7 @@ function RelList({ items, nodes, onSelect }: { items: Rel[]; nodes: BookNode[]; 
 
 export default function DetailPanel({
   node, nodes, incoming, outgoing, canRate, onRate, onSelect, onClose,
-  chips, bonds, shelfBooks, linkedBookKeys, allConcepts, onSetTie, onSetBond, onCreateConcept,
+  chips, bonds, shelfBooks, linkedBookKeys, allConcepts, onSetTie, onSetBond, onCreateConcept, onViewAccount,
 }: {
   node: BookNode
   nodes: BookNode[]
@@ -76,8 +76,29 @@ export default function DetailPanel({
   onSetTie: (conceptKey: string, bookKey: string, strength: number | null) => void
   onSetBond: (bookKey: string, otherKey: string, strength: number | null) => void
   onCreateConcept: (label: string, bookKey: string) => void
+  onViewAccount?: (id: string, username: string) => void
 }) {
   const isConcept = node.kind === 'concept'
+  const isAccount = node.kind === 'account'
+  if (isAccount) {
+    const books = incoming.length + outgoing.length
+    return (
+      <aside className="absolute right-2.5 top-2.5 z-[5] max-h-[calc(100%-18px)] w-[min(330px,76vw)] overflow-y-auto rounded-[13px] border border-line bg-panel/[0.975] p-[14px_15px] backdrop-blur max-[640px]:inset-x-2 max-[640px]:bottom-2 max-[640px]:top-auto max-[640px]:max-h-[50%] max-[640px]:w-auto">
+        <button onClick={onClose} className="float-right -mr-1 -mt-0.5 px-1 text-[17px] leading-none text-muted">×</button>
+        <p className="m-0 mb-1 text-[10px] tracking-[0.12em] text-[#f0abfc]">アカウント</p>
+        <h2 className="m-0 mb-1 pr-4 text-[15px] leading-[1.45]">{node.title}</h2>
+        <p className="m-0 mb-3 text-[11.5px] text-muted">本棚 {books} 冊のクラスタ</p>
+        {onViewAccount && (
+          <button
+            onClick={() => onViewAccount(node.key.slice(5), node.title)}
+            className="w-full rounded-lg border border-[#2f4a58] bg-acc/10 py-2 text-[12px] font-bold text-acc active:bg-acc/25"
+          >
+            この人の地図を見る
+          </button>
+        )}
+      </aside>
+    )
+  }
   const starColor = isConcept
     ? '#c4b5fd'
     : node.star === null
@@ -215,6 +236,7 @@ function ConceptChips({
   canRate: boolean
   onSetTie: (conceptKey: string, bookKey: string, strength: number | null) => void
   onCreateConcept: (label: string, bookKey: string) => void
+  onViewAccount?: (id: string, username: string) => void
 }) {
   const [adding, setAdding] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
