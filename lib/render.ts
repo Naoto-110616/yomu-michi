@@ -45,7 +45,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   const k = Math.max(T.k, 0.25)
   const focus = s.selected ?? s.hovered
 
-  // ── エッジ ─────────────────────────────
+  // ── エッジ ───────────────────────
   for (const ei of s.visibleEdges) {
     const e = graph.edges[ei]
     if (!e) continue // グラフ再構築の瞬間に古いインデックスが混ざっても落とさない
@@ -54,13 +54,14 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     if (a < 0.02) continue
 
     const strong = e.type !== 'alt'
-    const w = e.weight ?? 1
-    // 紐付けた人数が多いほど太く・明るく（対数スケールで頭打ち）
-    const memberWidth = 1.1 + Math.log2(1 + Math.max(0, w - 1)) * 1.6
-    const memberGlow = Math.min(0.55 + (w - 1) * 0.12, 0.95)
-    ctx.globalAlpha = a * (e.type === 'alt' ? 0.36 : e.type === 'member' ? memberGlow : 0.85)
+    const w = e.weight ?? 1 // 平均強度 1-5
+    const tie = e.type === 'member' || e.type === 'bond'
+    // 強度1→細く控えめ、強度5→太く明るく。人数はわずかに輝きへ
+    const tieWidth = 0.8 + (w - 1) * 0.95
+    const tieGlow = Math.min(0.4 + (w - 1) * 0.12 + Math.min((e.supporters ?? 1) - 1, 4) * 0.04, 0.95)
+    ctx.globalAlpha = a * (e.type === 'alt' ? 0.36 : tie ? tieGlow : 0.85)
     ctx.strokeStyle = meta.color
-    ctx.lineWidth = (e.type === 'alt' ? 0.8 : e.type === 'member' ? memberWidth : 1.7) / k
+    ctx.lineWidth = (e.type === 'alt' ? 0.8 : tie ? tieWidth : 1.7) / k
     ctx.setLineDash(meta.dashed ? [3 / k, 3.5 / k] : [])
     ctx.beginPath()
     ctx.moveTo(P[e.from].x, P[e.from].y)
@@ -88,7 +89,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     }
   }
 
-  // ── ノード ─────────────────────────────
+  // ── ノード ───────────────────────
   for (const i of sim.activeList) {
     const n = graph.nodes[i]
     const a = fade[i]
@@ -97,7 +98,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     ctx.globalAlpha = a
 
     if (n.kind === 'concept') {
-      // 概念はうっすら光らせて、本より上位であることを見せる
+      // 概念はうすら光らせて、本より上位であることを見せる
       const g = ctx.createRadialGradient(P[i].x, P[i].y, r * 0.3, P[i].x, P[i].y, r * 2.4)
       g.addColorStop(0, 'rgba(167,139,250,.30)')
       g.addColorStop(1, 'rgba(167,139,250,0)')
@@ -134,7 +135,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     }
   }
 
-  // ── ラベル（優先度順・衝突したら捨てる）──────────
+  // ── ラベル（優先度順・衝突したら捨てる）──────
   const boxes: [number, number, number, number][] = []
   const free = (a: number, b: number, c: number, d: number) => {
     for (const r of boxes) if (a < r[2] && c > r[0] && b < r[3] && d > r[1]) return false
@@ -184,7 +185,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   ctx.globalAlpha = 1
 }
 
-/* ── 座標変換 / ヒットテスト ───────────────────────── */
+/* ── 座標変換 / ヒットテスト ───────────────── */
 
 export const toWorld = (T: Transform, sx: number, sy: number) => ({
   x: (sx - T.x) / T.k,

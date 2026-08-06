@@ -8,7 +8,7 @@
  * このプロダクトの中身は、単なる「関連」ではなく関係の種類を区別することにある。
  */
 
-export const RELATIONS = ['member', 'pre', 'next', 'alt', 'counter'] as const
+export const RELATIONS = ['member', 'bond', 'pre', 'next', 'alt', 'counter'] as const
 export type RelationType = (typeof RELATIONS)[number]
 
 export const RELATION_META: Record<
@@ -17,7 +17,11 @@ export const RELATION_META: Record<
 > = {
   member: {
     label: '所属', color: '#a78bfa', dashed: false, directed: false,
-    hint: 'この概念に属する本',
+    hint: 'この概念に属する本（太さ = 結びつきの平均強度）',
+  },
+  bond: {
+    label: '結びつき', color: '#22d3ee', dashed: false, directed: false,
+    hint: 'ユーザーが結びつけた本どうし',
   },
   pre: {
     label: '前提', color: '#f59e0b', dashed: false, directed: true,
@@ -51,9 +55,9 @@ export const CATEGORY_META: Record<Category, { label: string; color: string }> =
   lit:    { label: '文芸',       color: '#f9a8d4' },
   mind:   { label: '人の心',     color: '#f472b6' },
   design: { label: 'つくる側',   color: '#fdba74' },
-  comedy: { label: 'お笑い',     color: '#facc15' },
+  comedy: { label: 'お笑い', color: '#facc15' },
   work:   { label: '仕事・経済', color: '#a3e635' },
-  sci:    { label: '科学',       color: '#86efac' },
+  sci:    { label: '科学',     color: '#86efac' },
 }
 
 export const STAR_COLOR: Record<number, string> = {
@@ -105,8 +109,10 @@ export interface Edge {
   to: number
   type: RelationType
   why: string
-  /** 紐付けた人数。焼き込みの所属エッジは 1（AIの提案）扱い */
+  /** 結びつきの平均強度 1-5。焼き込みエッジは 1（AI提案の初期値） */
   weight?: number
+  /** 紐付けた人数 */
+  supporters?: number
 }
 
 export interface Payload {
@@ -141,7 +147,8 @@ export type ShelfOverride = Map<string, number> | null
 export interface GraphOverlay {
   books: { key: string; title: string; author: string; year: number; cat: string; isbn?: string }[]
   concepts: { key: string; label: string; description: string; official: boolean }[]
-  links: { concept: string; book: string; supporters: number }[]
+  links: { concept: string; book: string; supporters: number; strength: number }[]
+  bonds: { a: string; b: string; supporters: number; strength: number }[]
 }
 
 export function buildGraph(
@@ -225,23 +232,42 @@ export function buildGraph(
       const c = byKey.get(l.concept)
       const b = byKey.get(l.book)
       if (!c || !b) continue
+      const why = `${l.supporters}人 / 強さ 平均 ${l.strength}`
       const existing = edgeIndex.get(`${l.concept}::${l.book}`)
       if (existing) {
-        existing.weight = (existing.weight ?? 1) + l.supporters
-        existing.why = `${l.supporters}人が紐付け`
+        // 票がある場合は平均強度で置き換える（焼き込みの weight=1 は AI 初期値）
+        existing.weight = l.strength
+        existing.supporters = l.supporters
+        existing.why = why
       } else {
         edges.push({
           from: c.i, to: b.i, type: 'member',
-          why: `${l.supporters}人が紐付け`, weight: l.supporters,
+          why, weight: l.strength, supporters: l.supporters,
         })
       }
+    }
+    // 本と本の結びつき
+    for (const bond of overlay.bonds) {
+      const a = byKey.get(bond.a)
+      const b = byKey.get(bond.b)
+      if (!a || !b) continue
+      edges.push({
+        from: a.i, to: b.i, type: 'bond',
+        why: `${bond.supporters}人 / 強さ 平均 ${bond.strength}`,
+        weight: bond.strength, supporters: bond.supporters,
+      })
     }
     // 動的概念ノードの初期位置は、紐付いた本の重心の近くへ
     for (const n of nodes) {
       if (!n.dynamic) continue
-      const linked = overlay.links.filter((l) => l.concept === n.key || l.book === n.key)
+      const linked = [
+        ...overlay.links.filter((l) => l.concept === n.key || l.book === n.key)
+          .map((l) => ({ other: l.concept === n.key ? l.book : l.concept })),
+        ...overlay.bonds.filter((l) => l.a === n.key || l.b === n.key)
+          .map((l) => ({ other: l.a === n.key ? l.b : l.a })),
+      ]
       const anchors = linked
-        .map((l) => byKey.get(l.concept === n.key ? l.book : l.concept))
+        .map((l) => byKey.get(l.other))
         .filter((a): a is BookNode => !!a && !a.dynamic)
       if (anchors.length) {
         n.x = anchors.reduce((s2, a) => s2 + a.x, 0) / anchors.length + (Math.random() - 0.5) * 60
@@ -258,8 +284,8 @@ export function buildGraph(
     nodes[e.to].degree++
   })
 
-  // ── 階層を決める ──────────────────────────────
-  // 概念 → 読んだ本 → そのどちらかに1ホップで繋がる本 → それ以外
+  // ── 階層を決める ───────────────────────
+  // 概念 → 読んだ本 → そのどちらかに1ホップで絋がる本 → それ以外
   const core = new Set<number>()
   nodes.forEach((n) => {
     if (n.kind === 'concept') { n.tier = 'concept'; core.add(n.i) }
@@ -280,7 +306,7 @@ export function buildGraph(
   }
 }
 
-/* ── 表示のためのヘルパー ───────────────────────── */
+/* ── 表示のためのヘルパー ───────────────────── */
 
 /** ネットワークのサイズ = 何段目まで出すか */
 export const DEPTHS: { id: number; label: string; tiers: Tier[] }[] = [
