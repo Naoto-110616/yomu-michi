@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import {
   CATEGORIES, CATEGORY_META, DEPTHS, RELATIONS, RELATION_META,
   type BookNode, type Category, type RelationType, type ViewMode,
@@ -12,6 +13,60 @@ const MODES: { id: ViewMode; label: string }[] = [
   { id: 'shelf', label: '読んだ本' },
   { id: 'human', label: '人が張った線' },
 ]
+
+/** 概念の新規作成。作った概念は「自分の軸」としてすぐ地図に立つ */
+function ConceptCreator({ loggedIn, onCreate }: { loggedIn: boolean; onCreate: (label: string) => void }) {
+  const [adding, setAdding] = useState(false)
+  const [label, setLabel] = useState('')
+  if (!loggedIn) {
+    return (
+      <button
+        disabled
+        title="ログインすると概念を作れます"
+        className="rounded-full border border-dashed border-line px-2.5 py-[5px] text-[11.5px] text-dim"
+      >
+        ＋ 概念を追加（要ログイン）
+      </button>
+    )
+  }
+  if (!adding) {
+    return (
+      <button
+        onClick={() => setAdding(true)}
+        className="rounded-full border border-dashed border-[#3b3357] px-2.5 py-[5px] text-[11.5px] text-[#c4b5fd] active:bg-[#a78bfa]/15"
+      >
+        ＋ 概念を追加
+      </button>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <input
+        autoFocus
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && label.trim().length >= 2) {
+            onCreate(label.trim())
+            setLabel('')
+            setAdding(false)
+          }
+          if (e.key === 'Escape') setAdding(false)
+        }}
+        placeholder="概念の名前（例: 積読の言い訳）"
+        className="w-44 rounded-full border border-line bg-panel2 px-2.5 py-[5px] text-[11.5px] text-text outline-none placeholder:text-dim"
+      />
+      <button
+        disabled={label.trim().length < 2}
+        onClick={() => { onCreate(label.trim()); setLabel(''); setAdding(false) }}
+        className="rounded-full border border-[#3b3357] bg-[#a78bfa]/15 px-2.5 py-[5px] text-[11.5px] font-bold text-[#c4b5fd] disabled:opacity-40"
+      >
+        作る
+      </button>
+      <button onClick={() => setAdding(false)} className="text-[10.5px] text-dim">やめる</button>
+    </span>
+  )
+}
 
 function Chip({ on, onClick, swatch, label, count }: {
   on: boolean; onClick: () => void; swatch?: React.ReactNode; label: string; count?: number
@@ -48,6 +103,7 @@ export default function Controls(props: {
   onQuery: (q: string) => void
   concepts: BookNode[]
   onPickConcept: (i: number) => void
+  conceptCreate: { loggedIn: boolean; onCreate: (label: string) => void }
   worldSearch: {
     loggedIn: boolean
     knownKeys: Set<string>
@@ -115,13 +171,7 @@ export default function Controls(props: {
             {c.title}
           </button>
         ))}
-        <button
-          disabled
-          title="AIが提案し、あなたが直す形で増やしていきます"
-          className="rounded-full border border-dashed border-line px-2.5 py-[5px] text-[11.5px] text-dim"
-        >
-          ＋ 概念を追加（近日）
-        </button>
+        <ConceptCreator {...props.conceptCreate} />
       </div>
 
       <p className="mb-1.5 text-[10px] tracking-[0.09em] text-dim">表示モード</p>
