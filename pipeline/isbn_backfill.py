@@ -65,3 +65,5 @@ for n in targets[:MAX_QUERIES]:
 json.dump(isbn_map, open(MAP, 'w'), ensure_ascii=False, indent=0, sort_keys=True)
 json.dump(misses, open(MISS, 'w'), ensure_ascii=False, indent=0, sort_keys=True)
 print(f'done: resolved={len(isbn_map)} misses={len(misses)}')
+
+# NOTE: pushing this file triggers .github/workflows/isbn.yml (first run bootstrap).
