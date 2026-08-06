@@ -12,6 +12,8 @@ export interface Transform { x: number; y: number; k: number }
 
 export interface RenderState {
   graph: Graph
+  /** ノードごとの紐付け人数合計（大きさに反映） */
+  boosts: Map<number, number>
   sim: Simulation
   transform: Transform
   width: number
@@ -43,7 +45,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   const k = Math.max(T.k, 0.25)
   const focus = s.selected ?? s.hovered
 
-  // ── エッジ ─────────────────────────────
+  // ── エッジ ─────────────────────────
   for (const ei of s.visibleEdges) {
     const e = graph.edges[ei]
     const meta = RELATION_META[e.type]
@@ -51,9 +53,13 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     if (a < 0.02) continue
 
     const strong = e.type !== 'alt'
-    ctx.globalAlpha = a * (e.type === 'alt' ? 0.36 : e.type === 'member' ? 0.55 : 0.85)
+    const w = e.weight ?? 1
+    // 紐付けた人数が多いほど太く・明るく（対数スケールで頭打ち）
+    const memberWidth = 1.1 + Math.log2(1 + Math.max(0, w - 1)) * 1.6
+    const memberGlow = Math.min(0.55 + (w - 1) * 0.12, 0.95)
+    ctx.globalAlpha = a * (e.type === 'alt' ? 0.36 : e.type === 'member' ? memberGlow : 0.85)
     ctx.strokeStyle = meta.color
-    ctx.lineWidth = (e.type === 'alt' ? 0.8 : e.type === 'member' ? 1.1 : 1.7) / k
+    ctx.lineWidth = (e.type === 'alt' ? 0.8 : e.type === 'member' ? memberWidth : 1.7) / k
     ctx.setLineDash(meta.dashed ? [3 / k, 3.5 / k] : [])
     ctx.beginPath()
     ctx.moveTo(P[e.from].x, P[e.from].y)
@@ -67,7 +73,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
       const d = Math.hypot(dx, dy) || 1
       const ux = dx / d
       const uy = dy / d
-      const tip = nodeRadius(graph.nodes[e.to], s.nodeScale) + 2.5
+      const tip = nodeRadius(graph.nodes[e.to], s.nodeScale, s.boosts.get(e.to) ?? 0) + 2.5
       const ax = P[e.to].x - ux * tip
       const ay = P[e.to].y - uy * tip
       const sz = 5.5 / k
@@ -86,7 +92,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     const n = graph.nodes[i]
     const a = fade[i]
     if (a < 0.02) continue
-    const r = nodeRadius(n, s.nodeScale)
+    const r = nodeRadius(n, s.nodeScale, s.boosts.get(i) ?? 0)
     ctx.globalAlpha = a
 
     if (n.kind === 'concept') {
@@ -163,7 +169,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     const text = n.title.length > 16 ? n.title.slice(0, 15) + '…' : n.title
     const w = ctx.measureText(text).width
     const h = fs * 1.25
-    const yy = P[i].y - nodeRadius(n, s.nodeScale) - 4 / T.k
+    const yy = P[i].y - nodeRadius(n, s.nodeScale, s.boosts.get(i) ?? 0) - 4 / T.k
     if (!free(P[i].x - w / 2 - 1, yy - h, P[i].x + w / 2 + 1, yy + 2)) continue
     ctx.globalAlpha = fade[i]
     ctx.lineWidth = 3.4 / Math.max(T.k, 0.5)
@@ -193,7 +199,7 @@ export function hitTest(s: RenderState, sx: number, sy: number): number | null {
   for (const i of s.sim.activeList) {
     if (fade[i] < 0.25) continue
     const d = Math.hypot(P[i].x - w.x, P[i].y - w.y)
-    const reach = Math.max(nodeRadius(s.graph.nodes[i], s.nodeScale) + 8 / s.transform.k, 14 / s.transform.k)
+    const reach = Math.max(nodeRadius(s.graph.nodes[i], s.nodeScale, s.boosts.get(i) ?? 0) + 8 / s.transform.k, 14 / s.transform.k)
     if (d < reach && d < bestD) { bestD = d; best = i }
   }
   return best

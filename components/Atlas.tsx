@@ -8,6 +8,7 @@ import {
 import { Simulation } from '@/lib/simulation'
 import { fitTransform, hitTest, render, toWorld, type RenderState, type Transform } from '@/lib/render'
 import { getSupabase } from '@/lib/supabase'
+import { EMPTY_OVERLAY, fetchOverlay, ndlKey, type NdlItem, type Overlay } from '@/lib/overlay'
 import AccountMenu, { type SessionUser } from './AccountMenu'
 import Controls from './Controls'
 import DetailPanel from './DetailPanel'
@@ -49,12 +50,31 @@ export default function Atlas({ payload }: { payload: Payload }) {
     return () => { on = false }
   }, [user])
 
+  const [overlay, setOverlay] = useState<Overlay>(EMPTY_OVERLAY)
+  const reloadOverlay = useCallback(() => {
+    fetchOverlay(user?.id ?? null).then(setOverlay).catch(() => {})
+  }, [user?.id])
+  useEffect(reloadOverlay, [reloadOverlay])
+
   const shelfOverride: ShelfOverride = user ? (userShelf ?? new Map()) : null
   const graph = useMemo(
-    () => buildGraph(payload, shelfOverride),
+    () => buildGraph(payload, shelfOverride, overlay),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [payload, user?.id, userShelf]
+    [payload, user?.id, userShelf, overlay]
   )
+
+  // ノードごとの紐付け人数（大きさに反映）
+  const boosts = useMemo(() => {
+    const m = new Map<number, number>()
+    const byKey = new Map(graph.nodes.map((n) => [n.key, n.i]))
+    for (const l of overlay.links) {
+      for (const k of [l.concept, l.book]) {
+        const i = byKey.get(k)
+        if (i !== undefined) m.set(i, (m.get(i) ?? 0) + l.supporters)
+      }
+    }
+    return m
+  }, [graph, overlay])
 
   // グラフを作り直しても、前のシミュレーションから位置を引き継ぐ（★を付けても地図が飛ばない）
   const prevSim = useRef<Simulation | null>(null)
@@ -85,14 +105,14 @@ export default function Atlas({ payload }: { payload: Payload }) {
   const visibleEdges = useRef<number[]>([])
 
   const snapshot = useCallback((): RenderState => ({
-    graph, sim,
+    graph, sim, boosts,
     transform: transform.current,
     width: size.current.w,
     height: size.current.h,
     dpr: size.current.dpr,
     visibleEdges: visibleEdges.current,
     ...filters.current,
-  }), [graph, sim])
+  }), [graph, sim, boosts])
 
   /* ── 描画ループ。sim が「もう動かない」と言ったら完全に止まる ── */
   const raf = useRef<number | null>(null)
@@ -148,6 +168,8 @@ export default function Atlas({ payload }: { payload: Payload }) {
     const tiers = new Set(DEPTHS[depth].tiers)
     const nodeIds = new Set<number>()
     graph.nodes.forEach((n) => {
+      // 動的ノード（実体化した本・ユーザー概念）は絞り込みに関係なく出す
+      if (n.dynamic) { nodeIds.add(n.i); return }
       if (!tiers.has(n.tier)) return
       if (!categories.has(n.cat)) return
       if (mode === 'shelf' && n.kind !== 'concept' && !n.shelf) return
@@ -171,11 +193,11 @@ export default function Atlas({ payload }: { payload: Payload }) {
       if (nodeIds.has(e.from) && nodeIds.has(e.to)) eids.push(i)
     })
     visibleEdges.current = eids
-    sim.setRadii((i) => nodeRadius(graph.nodes[i], nodeScale))
+    sim.setRadii((i) => nodeRadius(graph.nodes[i], nodeScale, boosts.get(i) ?? 0))
     sim.setVisible(graph, nodeIds, eids)
     setVisibleCount(nodeIds.size)
     kick()
-  }, [graph, sim, depth, categories, edgeTypes, mode, nodeScale, selected, kick])
+  }, [graph, sim, depth, categories, edgeTypes, mode, nodeScale, selected, boosts, kick])
 
   /* ── 強調（不透明度の目標値）。物理は動かさない ── */
   useEffect(() => {
@@ -407,6 +429,44 @@ export default function Atlas({ payload }: { payload: Payload }) {
     }
   }, [user])
 
+  /* ── 概念への紐付け（投票） ─────────────────── */
+  const toggleLink = useCallback(async (conceptKey: string, bookKey: string, currentlyMine: boolean) => {
+    const sb = getSupabase()
+    if (!sb || !user) return
+    if (currentlyMine) {
+      await sb.from('concept_links').delete()
+        .eq('concept_key', conceptKey).eq('book_key', bookKey).eq('user_id', user.id)
+    } else {
+      await sb.from('concept_links').upsert({ concept_key: conceptKey, book_key: bookKey, user_id: user.id })
+    }
+    reloadOverlay()
+  }, [user, reloadOverlay])
+
+  const createConcept = useCallback(async (label: string, bookKey: string) => {
+    const sb = getSupabase()
+    if (!sb || !user) return
+    const key = `u_${crypto.randomUUID().slice(0, 8)}`
+    const { error } = await sb.from('concepts').insert({ key, label, description: '', official: false, created_by: user.id })
+    if (!error) {
+      await sb.from('concept_links').upsert({ concept_key: key, book_key: bookKey, user_id: user.id })
+    }
+    reloadOverlay()
+  }, [user, reloadOverlay])
+
+  /* ── NDL検索からの実体化: books に登録 → 棚に入れる ── */
+  const materialize = useCallback(async (item: NdlItem) => {
+    const sb = getSupabase()
+    if (!sb || !user) return
+    const key = ndlKey(item)
+    await sb.from('books').upsert({
+      key, isbn: item.isbn || null, title: item.title, author: item.author,
+      publisher: item.publisher, year: item.year, cat: 'lit', created_by: user.id,
+    })
+    await sb.from('shelf').upsert({ user_id: user.id, book_key: key, star: 0 })
+    setUserShelf((prev) => new Map(prev ?? []).set(key, 0))
+    reloadOverlay()
+  }, [user, reloadOverlay])
+
   /* ── 詳細パネル用 ─────────────────────────── */
   const relations = useMemo(() => {
     if (selected === null) return null
@@ -477,6 +537,11 @@ export default function Atlas({ payload }: { payload: Payload }) {
         onQuery={setQuery}
         concepts={graph.concepts.map((i) => graph.nodes[i])}
         onPickConcept={select}
+        worldSearch={{
+          loggedIn: !!user,
+          knownKeys: new Set(graph.nodes.map((n) => n.key)),
+          onMaterialize: materialize,
+        }}
       />
 
       <div ref={wrapRef} className="relative min-h-0 flex-1 touch-none overflow-hidden">
@@ -492,6 +557,18 @@ export default function Atlas({ payload }: { payload: Payload }) {
             onRate={rate}
             onSelect={select}
             onClose={() => setSelected(null)}
+            chips={overlay.links
+              .filter((l) => l.book === graph.nodes[selected].key)
+              .map((l) => ({
+                key: l.concept,
+                label: overlay.concepts.find((c) => c.key === l.concept)?.label ?? l.concept,
+                supporters: l.supporters,
+                mine: overlay.mine.has(`${l.concept}::${graph.nodes[selected].key}`),
+              }))
+              .sort((a, b) => b.supporters - a.supporters)}
+            allConcepts={overlay.concepts.map((c) => ({ key: c.key, label: c.label }))}
+            onToggleLink={toggleLink}
+            onCreateConcept={createConcept}
           />
         )}
       </div>
