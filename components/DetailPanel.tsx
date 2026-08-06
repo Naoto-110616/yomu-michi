@@ -143,7 +143,7 @@ export default function DetailPanel({
 }
 
 
-/* ── この本が属する概念（＝ハッシュタグ + 投票） ───────────── */
+/* ── この本が属する概念（＝ハッシュタグ + 投票） ─────────────── */
 
 function ConceptChips({
   node, chips, allConcepts, canRate, onToggleLink, onCreateConcept,
