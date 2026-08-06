@@ -17,11 +17,12 @@ export interface ConceptChip {
 
 export type BondRel = 'pre' | 'next' | 'alt' | 'counter'
 
-export const BOND_RELS: { id: BondRel; label: string; hint: string }[] = [
-  { id: 'pre', label: '前提', hint: '相手を先に読むと、この本が効く' },
-  { id: 'next', label: '続き・発展', hint: 'この本の次に読む' },
-  { id: 'alt', label: '似ている', hint: '同じ読み味・同じテーマ' },
-  { id: 'counter', label: '反論', hint: '主張が対立している' },
+export const BOND_RELS: { id: BondRel; label: string; hint: string; stars: boolean }[] = [
+  { id: 'pre', label: '前提', hint: '相手を先に読むと、この本が効く', stars: true },
+  // 続き・シリーズは事実関係なので強さの投票は不要
+  { id: 'next', label: '続き・発展', hint: 'この本の次に読む（星は不要）', stars: false },
+  { id: 'alt', label: '似ている', hint: '同じ読み味・同じテーマ', stars: true },
+  { id: 'counter', label: '反論', hint: '主張が対立している', stars: true },
 ]
 
 export interface BondChip {
@@ -65,7 +66,7 @@ function RelList({ items, nodes, onSelect }: { items: Rel[]; nodes: BookNode[]; 
 
 export default function DetailPanel({
   node, nodes, incoming, outgoing, canRate, onRate, onSelect, onClose,
-  chips, bonds, shelfBooks, linkedBookKeys, allConcepts, onSetTie, onSetBond, onCreateConcept, onViewAccount,
+  chips, bonds, shelfBooks, linkedBookKeys, allConcepts, onSetTie, onSetBond, onCreateConcept, onViewAccount, onAuthorClick,
 }: {
   node: BookNode
   nodes: BookNode[]
@@ -88,6 +89,7 @@ export default function DetailPanel({
   onSetBond: (bookKey: string, otherKey: string, rel: BondRel, strength: number | null) => void
   onCreateConcept: (label: string, bookKey: string) => void
   onViewAccount?: (id: string, username: string) => void
+  onAuthorClick?: (author: string) => void
 }) {
   const isConcept = node.kind === 'concept'
   const isAccount = node.kind === 'account'
@@ -135,7 +137,17 @@ export default function DetailPanel({
       ) : (
         <>
           <p className="m-0 mb-2 text-[11.5px] text-muted">
-            {node.author}
+            {node.author && node.author !== '—' && onAuthorClick ? (
+              <button
+                onClick={() => onAuthorClick(node.author)}
+                title="この著者の本を地図上で光らせる"
+                className="underline decoration-dotted underline-offset-2 active:text-text"
+              >
+                {node.author}
+              </button>
+            ) : (
+              node.author
+            )}
             {node.year > 0 && ` / ${node.year}`}
           </p>
           <p className="m-0 mb-1.5 text-[12.5px] tracking-[0.1em]" style={{ color: starColor }}>
@@ -248,6 +260,7 @@ function ConceptChips({
   onSetTie: (conceptKey: string, bookKey: string, strength: number | null) => void
   onCreateConcept: (label: string, bookKey: string) => void
   onViewAccount?: (id: string, username: string) => void
+  onAuthorClick?: (author: string) => void
 }) {
   const [adding, setAdding] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
@@ -437,11 +450,23 @@ function BondChips({
             >
               <span className="text-[9.5px] opacity-80">{relLabel(b.rel, b.isFrom)}</span>
               {b.label.length > 11 ? b.label.slice(0, 10) + '…' : b.label}
-              <span className="text-[10px] tabular-nums opacity-90">{b.strength.toFixed(1)}</span>
+              {b.rel !== 'next' && (
+                <span className="text-[10px] tabular-nums opacity-90">{b.strength.toFixed(1)}</span>
+              )}
             </button>
             {open === b.otherKey && (
               <span className="mt-1 flex items-center gap-1.5 rounded-lg border border-line bg-panel2 px-1.5 py-1">
-                <StarStrength value={b.mine} onPick={(st) => { onSetBond(node.key, b.otherKey, b.rel, st); setOpen(null) }} />
+                {b.rel !== 'next' && (
+                  <StarStrength value={b.mine} onPick={(st) => { onSetBond(node.key, b.otherKey, b.rel, st); setOpen(null) }} />
+                )}
+                {b.rel === 'next' && b.mine !== null && (
+                  <button
+                    onClick={() => { onSetBond(node.key, b.otherKey, b.rel, null); setOpen(null) }}
+                    className="text-[10px] text-dim"
+                  >
+                    外す
+                  </button>
+                )}
                 <button onClick={() => onSelect(b.otherIndex)} className="text-[10px] text-dim">見る</button>
               </span>
             )}
