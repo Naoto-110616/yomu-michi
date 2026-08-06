@@ -45,11 +45,11 @@ interface SimLink {
 
 /** バネの自然長。所属（概念→本）は短く、対立は長く */
 const DISTANCE: Record<RelationType, number> = {
-  member: 48, bond: 66, next: 34, pre: 60, alt: 84, counter: 98,
+  member: 48, bond: 66, follow: 520, next: 34, pre: 60, alt: 84, counter: 98,
 }
 /** バネの強さ。別視点は弱くして「うっすら引き合う」程度に */
 const STRENGTH: Record<RelationType, number> = {
-  member: 0.5, bond: 0.18, next: 0.45, pre: 0.32, alt: 0.06, counter: 0.1,
+  member: 0.5, bond: 0.18, follow: 0.05, next: 0.45, pre: 0.32, alt: 0.06, counter: 0.1,
 }
 
 const ALPHA_MIN = 0.004

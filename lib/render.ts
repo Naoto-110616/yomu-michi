@@ -97,8 +97,8 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     const r = nodeRadius(n, s.nodeScale, s.boosts.get(i) ?? 0)
     ctx.globalAlpha = a
 
-    if (n.kind === 'concept') {
-      // 概念はうっすら光らせて、本より上位であることを見せる
+    if (n.kind === 'concept' || n.kind === 'account') {
+      // 概念とアカウントはうっすら光らせて、上位の存在であることを見せる
       const g = ctx.createRadialGradient(P[i].x, P[i].y, r * 0.3, P[i].x, P[i].y, r * 2.4)
       g.addColorStop(0, 'rgba(167,139,250,.30)')
       g.addColorStop(1, 'rgba(167,139,250,0)')
@@ -115,7 +115,11 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     ctx.fillStyle = nodeColor(n, s.mode)
     ctx.fill()
 
-    if (n.kind === 'concept') {
+    if (n.kind === 'account') {
+      ctx.lineWidth = 2 / k
+      ctx.strokeStyle = '#fdf4ff'
+      ctx.stroke()
+    } else if (n.kind === 'concept') {
       ctx.lineWidth = 1.6 / k
       ctx.strokeStyle = '#ddd6fe'
       ctx.stroke()
@@ -165,7 +169,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   for (const i of cand) {
     const n = graph.nodes[i]
     const isConcept = n.kind === 'concept'
-    const big = isConcept || i === focus || (n.shelf && n.star === 5)
+    const big = isConcept || n.kind === 'account' || i === focus || (n.shelf && n.star === 5)
     const fs = (isConcept ? 12.5 : big ? 10.5 : 8.8) / Math.max(T.k, 0.5)
     ctx.font = `${big ? 700 : 500} ${fs}px -apple-system,"Hiragino Sans","Noto Sans JP",sans-serif`
     const text = n.title.length > 16 ? n.title.slice(0, 15) + '…' : n.title

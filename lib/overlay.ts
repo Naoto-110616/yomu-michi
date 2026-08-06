@@ -163,3 +163,35 @@ export const ndlKey = (item: NdlItem) => (item.isbn ? `isbn:${item.isbn}` : item
 
 /** 本と本の結びつきの正規化（無向: 辞書順で a < b） */
 export const bondPair = (x: string, y: string): [string, string] => (x < y ? [x, y] : [y, x])
+
+
+/* ── フォローの地図のデータ: 自分 + フォロー先の本棚とフォロー網 ── */
+
+export async function fetchSocial(me: { id: string; email: string }) {
+  const sb = getSupabase()
+  if (!sb) return null
+  const [profiles, follows] = await Promise.all([
+    sb.from('profiles').select('id, username'),
+    sb.from('follows').select('follower, followee'),
+  ])
+  const myFollowees = new Set(
+    (follows.data ?? []).filter((f) => f.follower === me.id).map((f) => f.followee as string)
+  )
+  const ids = [me.id, ...myFollowees]
+  const shelves = await sb.from('shelf').select('user_id, book_key, star').in('user_id', ids)
+  const shelfMap = new Map<string, Map<string, number>>()
+  for (const r of shelves.data ?? []) {
+    const uid = r.user_id as string
+    if (!shelfMap.has(uid)) shelfMap.set(uid, new Map())
+    shelfMap.get(uid)!.set(r.book_key as string, r.star as number)
+  }
+  const all = (profiles.data ?? []).map((r) => ({ id: r.id as string, username: r.username as string }))
+  return {
+    me: { id: me.id, username: all.find((p) => p.id === me.id)?.username ?? me.email.split('@')[0] },
+    accounts: all.filter((p) => myFollowees.has(p.id)),
+    follows: (follows.data ?? [])
+      .map((f) => ({ follower: f.follower as string, followee: f.followee as string }))
+      .filter((f) => ids.includes(f.follower) && ids.includes(f.followee)),
+    shelves: shelfMap,
+  }
+}
