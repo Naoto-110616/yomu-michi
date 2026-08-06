@@ -1,2 +1,2 @@
 :HL["/yomu-michi/_next/static/chunks/3xdg7zy_n_j2o.css","style"]
-0:{"tree":{"name":"","param":null,"prefetchHints":4176,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":4256,"slots":null}}},"staleTime":300,"buildId":"Ju2Qpb5J7Oy1KDTI9RqSM"}
+0:{"tree":{"name":"","param":null,"prefetchHints":4176,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":4256,"slots":null}}},"staleTime":300,"buildId":"9FGROn-HhIka2crwprdF1"}
