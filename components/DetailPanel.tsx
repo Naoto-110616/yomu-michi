@@ -360,7 +360,7 @@ function ConceptLinker({
   )
 }
 
-/* ── 本と本の結びつき ──────────────────────────── */
+/* ── 本と本の結びつき ─────────────────────────────── */
 
 function BondChips({
   node, nodes, bonds, canRate, onSetBond, onSelect,
