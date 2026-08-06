@@ -10,13 +10,17 @@ export interface SessionUser {
 }
 
 export default function AccountMenu({
-  user, shelfCount, profiles, follows, viewingId, onToggleFollow, onView, onImportSample, onImportCsv,
+  user, shelfCount, profiles, follows, viewingId, overlaps, titleOf,
+  onToggleFollow, onView, onImportSample, onImportCsv,
 }: {
   user: SessionUser | null
   shelfCount: number | null
   profiles: Profile[]
   follows: Set<string>
   viewingId: string | null
+  /** userId → 自分の棚と重なっている本のキー（フォロー候補の並び順になる） */
+  overlaps: Map<string, string[]>
+  titleOf: (key: string) => string
   onToggleFollow: (profileId: string, on: boolean) => void
   onView: (p: Profile) => void
   onImportSample: () => Promise<number>
@@ -106,30 +110,62 @@ export default function AccountMenu({
               </label>
               {profiles.filter((p) => p.id !== user.id).length > 0 && (
                 <>
-                  <p className="m-0 mb-1 text-[10px] tracking-[0.08em] text-dim">アカウント同士の紐付き</p>
-                  <ul className="m-0 mb-2.5 max-h-[180px] list-none overflow-y-auto p-0">
-                    {profiles.filter((p) => p.id !== user.id).map((p) => {
+                  <p className="m-0 mb-1 text-[10px] tracking-[0.08em] text-dim">
+                    フォロー候補 — 本棚の重なりが多い順
+                  </p>
+                  <ul className="m-0 mb-2.5 max-h-[220px] list-none overflow-y-auto p-0">
+                    {profiles
+                      .filter((p) => p.id !== user.id)
+                      .map((p) => ({ p, over: overlaps.get(p.id) ?? [] }))
+                      // 未フォローの重なりが多い人が先頭 = 「次に繋がるべき人」
+                      .sort((a, b) => {
+                        const fa = follows.has(a.p.id) ? 1 : 0
+                        const fb = follows.has(b.p.id) ? 1 : 0
+                        if (fa !== fb) return fa - fb
+                        return b.over.length - a.over.length
+                      })
+                      .map(({ p, over }) => {
                       const following = follows.has(p.id)
+                      const sample = over.slice(0, 2).map((k) => {
+                        const t = titleOf(k)
+                        return t.length > 9 ? t.slice(0, 8) + '…' : t
+                      })
                       return (
-                        <li key={p.id} className="flex items-center gap-1.5 border-b border-[#20252e] py-1.5 last:border-b-0">
-                          <span className="min-w-0 flex-1 truncate text-[12px]">{p.username}</span>
-                          <button
-                            onClick={() => onToggleFollow(p.id, !following)}
-                            className={`flex-none rounded-full border px-2 py-0.5 text-[10.5px] ${
-                              following
-                                ? 'border-[#7c6bd6] bg-[#a78bfa]/20 text-[#e9d5ff]'
-                                : 'border-line text-muted'
-                            }`}
-                          >
-                            {following ? 'フォロー中' : 'フォロー'}
-                          </button>
-                          <button
-                            onClick={() => { onView(p); setOpen(false) }}
-                            disabled={viewingId === p.id}
-                            className="flex-none rounded-full border border-[#2f4a58] bg-acc/10 px-2 py-0.5 text-[10.5px] text-acc disabled:opacity-50"
-                          >
-                            地図を見る
-                          </button>
+                        <li key={p.id} className="border-b border-[#20252e] py-1.5 last:border-b-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="min-w-0 flex-1 truncate text-[12px]">
+                              {p.username}
+                              {over.length > 0 && (
+                                <span className={`ml-1.5 text-[10px] tabular-nums ${following ? 'text-dim' : 'text-[#5eead4]'}`}>
+                                  {over.length}冊重なり
+                                </span>
+                              )}
+                            </span>
+                            <button
+                              onClick={() => onToggleFollow(p.id, !following)}
+                              className={`flex-none rounded-full border px-2 py-0.5 text-[10.5px] ${
+                                following
+                                  ? 'border-[#7c6bd6] bg-[#a78bfa]/20 text-[#e9d5ff]'
+                                  : over.length > 0
+                                    ? 'border-[#0d5c53] bg-[#5eead4]/10 text-[#5eead4]'
+                                    : 'border-line text-muted'
+                              }`}
+                            >
+                              {following ? 'フォロー中' : 'フォロー'}
+                            </button>
+                            <button
+                              onClick={() => { onView(p); setOpen(false) }}
+                              disabled={viewingId === p.id}
+                              className="flex-none rounded-full border border-[#2f4a58] bg-acc/10 px-2 py-0.5 text-[10.5px] text-acc disabled:opacity-50"
+                            >
+                              地図を見る
+                            </button>
+                          </div>
+                          {over.length > 0 && !following && (
+                            <p className="m-0 mt-0.5 truncate text-[10px] text-dim">
+                              同じ本: {sample.join('、')}{over.length > 2 ? ` ほか${over.length - 2}冊` : ''}
+                            </p>
+                          )}
                         </li>
                       )
                     })}
