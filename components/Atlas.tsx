@@ -8,7 +8,7 @@ import {
 import { Simulation } from '@/lib/simulation'
 import { fitTransform, hitTest, render, toWorld, type RenderState, type Transform } from '@/lib/render'
 import { getSupabase } from '@/lib/supabase'
-import { EMPTY_OVERLAY, fetchOverlay, ndlKey, type NdlItem, type Overlay } from '@/lib/overlay'
+import { EMPTY_OVERLAY, bondPair, fetchOverlay, fetchPersonalView, ndlKey, type NdlItem, type Overlay, type Profile } from '@/lib/overlay'
 import AccountMenu, { type SessionUser } from './AccountMenu'
 import Controls from './Controls'
 import DetailPanel from './DetailPanel'
@@ -56,25 +56,55 @@ export default function Atlas({ payload }: { payload: Payload }) {
   }, [user?.id])
   useEffect(reloadOverlay, [reloadOverlay])
 
-  const shelfOverride: ShelfOverride = user ? (userShelf ?? new Map()) : null
+  /* ── 他アカウントの視点 ─────────────────────
+     フォローしている人の地図を「その人の本棚 + その人の強度」で見る。
+     平均ではなく本人の値で描くので、その人の頭の中の形がそのまま出る。 */
+  const [viewing, setViewing] = useState<Profile | null>(null)
+  const [personal, setPersonal] = useState<{
+    shelf: Map<string, number>
+    links: Overlay['links']
+    bonds: Overlay['bonds']
+  } | null>(null)
+  useEffect(() => {
+    if (!viewing) { setPersonal(null); return }
+    let on = true
+    fetchPersonalView(viewing.id).then((p) => { if (on && p) setPersonal(p) }).catch(() => {})
+    return () => { on = false }
+  }, [viewing])
+
+  const effectiveOverlay: Overlay = useMemo(() => {
+    if (!viewing || !personal) return overlay
+    return { ...overlay, links: personal.links, bonds: personal.bonds }
+  }, [overlay, viewing, personal])
+
+  const shelfOverride: ShelfOverride =
+    viewing && personal ? personal.shelf : user ? (userShelf ?? new Map()) : null
   const graph = useMemo(
-    () => buildGraph(payload, shelfOverride, overlay),
+    () => buildGraph(payload, shelfOverride, effectiveOverlay),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [payload, user?.id, userShelf, overlay]
+    [payload, user?.id, userShelf, effectiveOverlay, viewing?.id, personal]
   )
 
   // ノードごとの紐付け人数（大きさに反映）
   const boosts = useMemo(() => {
     const m = new Map<number, number>()
     const byKey = new Map(graph.nodes.map((n) => [n.key, n.i]))
-    for (const l of overlay.links) {
-      for (const k of [l.concept, l.book]) {
-        const i = byKey.get(k)
-        if (i !== undefined) m.set(i, (m.get(i) ?? 0) + l.supporters)
-      }
+    const add = (k: string, v: number) => {
+      const i = byKey.get(k)
+      if (i !== undefined) m.set(i, (m.get(i) ?? 0) + v)
+    }
+    // 結びつきの強さ（平均×人数の対数）でノードが育つ
+    for (const l of effectiveOverlay.links) {
+      const v = l.strength * (1 + Math.log2(1 + l.supporters) * 0.4)
+      add(l.concept, v)
+      add(l.book, v)
+    }
+    for (const b of effectiveOverlay.bonds) {
+      add(b.a, b.strength)
+      add(b.b, b.strength)
     }
     return m
-  }, [graph, overlay])
+  }, [graph, effectiveOverlay])
 
   // グラフを作り直しても、前のシミュレーションから位置を引き継ぐ（★を付けても地図が飛ばない）
   const prevSim = useRef<Simulation | null>(null)
@@ -453,15 +483,28 @@ export default function Atlas({ payload }: { payload: Payload }) {
     }
   }, [user])
 
-  /* ── 概念への紐付け（投票） ─────────────────── */
-  const toggleLink = useCallback(async (conceptKey: string, bookKey: string, currentlyMine: boolean) => {
+  /* ── 概念への紐付け: 強度 1-5 を付ける / null で外す ── */
+  const setTie = useCallback(async (conceptKey: string, bookKey: string, strength: number | null) => {
     const sb = getSupabase()
     if (!sb || !user) return
-    if (currentlyMine) {
+    if (strength === null) {
       await sb.from('concept_links').delete()
         .eq('concept_key', conceptKey).eq('book_key', bookKey).eq('user_id', user.id)
     } else {
-      await sb.from('concept_links').upsert({ concept_key: conceptKey, book_key: bookKey, user_id: user.id })
+      await sb.from('concept_links').upsert({ concept_key: conceptKey, book_key: bookKey, user_id: user.id, strength })
+    }
+    reloadOverlay()
+  }, [user, reloadOverlay])
+
+  /* ── 本と本の結びつき（無向・辞書順に正規化） ── */
+  const setBond = useCallback(async (bookKey: string, otherKey: string, strength: number | null) => {
+    const sb = getSupabase()
+    if (!sb || !user) return
+    const [a, b] = bondPair(bookKey, otherKey)
+    if (strength === null) {
+      await sb.from('book_links').delete().eq('a_key', a).eq('b_key', b).eq('user_id', user.id)
+    } else {
+      await sb.from('book_links').upsert({ a_key: a, b_key: b, user_id: user.id, strength })
     }
     reloadOverlay()
   }, [user, reloadOverlay])
@@ -488,6 +531,15 @@ export default function Atlas({ payload }: { payload: Payload }) {
     })
     await sb.from('shelf').upsert({ user_id: user.id, book_key: key, star: 0 })
     setUserShelf((prev) => new Map(prev ?? []).set(key, 0))
+    reloadOverlay()
+  }, [user, reloadOverlay])
+
+  /* ── フォロー ───────────────────────────── */
+  const toggleFollow = useCallback(async (profileId: string, on: boolean) => {
+    const sb = getSupabase()
+    if (!sb || !user) return
+    if (on) await sb.from('follows').upsert({ follower: user.id, followee: profileId })
+    else await sb.from('follows').delete().eq('follower', user.id).eq('followee', profileId)
     reloadOverlay()
   }, [user, reloadOverlay])
 
@@ -530,10 +582,29 @@ export default function Atlas({ payload }: { payload: Payload }) {
           読む道 <span className="text-acc">/ Atlas</span>
         </h1>
         <p className="truncate text-[10.5px] text-dim">
-          {user ? `${user.email.split('@')[0]} の本棚` : 'サンプル本棚'} ・ 表示中 {visibleCount} / {graph.meta.nodes}
+          {viewing
+            ? `${viewing.username} の地図を見ています`
+            : user ? `${user.email.split('@')[0]} の本棚` : 'サンプル本棚'}
+          {' ・ 表示中 '}{visibleCount} / {graph.meta.nodes}
         </p>
+        {viewing && (
+          <button
+            onClick={() => setViewing(null)}
+            className="flex-none rounded-full border border-[#7c6bd6] bg-[#a78bfa]/20 px-2.5 py-1 text-[10.5px] text-[#e9d5ff]"
+          >
+            自分に戻る
+          </button>
+        )}
         <div className="ml-auto flex flex-none items-center gap-1.5">
-          <AccountMenu user={user} shelfCount={user ? (userShelf?.size ?? null) : null} />
+          <AccountMenu
+            user={user}
+            shelfCount={user ? (userShelf?.size ?? null) : null}
+            profiles={overlay.profiles}
+            follows={overlay.follows}
+            viewingId={viewing?.id ?? null}
+            onToggleFollow={toggleFollow}
+            onView={(p) => setViewing(p)}
+          />
           <button
             onClick={() => setControlsOpen((v) => !v)}
             className="rounded-lg border border-line bg-panel2 px-2.5 py-1.5 text-[11px] text-muted active:text-text"
@@ -577,7 +648,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
             nodes={graph.nodes}
             incoming={relations.incoming}
             outgoing={relations.outgoing}
-            canRate={!!user}
+            canRate={!!user && !viewing}
             onRate={rate}
             onSelect={select}
             onClose={() => setSelected(null)}
@@ -587,11 +658,29 @@ export default function Atlas({ payload }: { payload: Payload }) {
                 key: l.concept,
                 label: overlay.concepts.find((c) => c.key === l.concept)?.label ?? l.concept,
                 supporters: l.supporters,
-                mine: overlay.mine.has(`${l.concept}::${graph.nodes[selected].key}`),
+                strength: l.strength,
+                mine: overlay.mine.get(`${l.concept}::${graph.nodes[selected].key}`) ?? null,
               }))
-              .sort((a, b) => b.supporters - a.supporters)}
+              .sort((a, b) => b.strength - a.strength)}
+            bonds={overlay.bonds
+              .filter((l) => l.a === graph.nodes[selected].key || l.b === graph.nodes[selected].key)
+              .map((l) => {
+                const otherKey = l.a === graph.nodes[selected].key ? l.b : l.a
+                const other = graph.nodes.find((n) => n.key === otherKey)
+                return {
+                  otherKey,
+                  otherIndex: other?.i ?? -1,
+                  label: other?.title ?? otherKey,
+                  supporters: l.supporters,
+                  strength: l.strength,
+                  mine: overlay.mine.get(`${l.a}::${l.b}`) ?? null,
+                }
+              })
+              .filter((b) => b.otherIndex >= 0)
+              .sort((a, b) => b.strength - a.strength)}
             allConcepts={overlay.concepts.map((c) => ({ key: c.key, label: c.label }))}
-            onToggleLink={toggleLink}
+            onSetTie={setTie}
+            onSetBond={setBond}
             onCreateConcept={createConcept}
           />
         )}
