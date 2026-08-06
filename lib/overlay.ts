@@ -243,6 +243,27 @@ export function normalizeTitleKey(raw: string): string {
 export const bondPair = (x: string, y: string): [string, string] => (x < y ? [x, y] : [y, x])
 
 
+/* ── ブクログ連携（IDだけで本棚を再現する） ──────────────
+   非公式の公開JSON APIを同一オリジンの Worker (/api/booklog) 経由で読む。
+   前提:「読んだ本には星を付けている」→ 星1〜5の合併 = 読了本。 */
+
+export interface BooklogBook {
+  title: string
+  /** ISBN-13。Kindle(ASIN) 等で取れない場合は空 */
+  isbn: string
+  star: number
+}
+
+export async function fetchBooklogShelf(booklogId: string): Promise<BooklogBook[]> {
+  const res = await fetch(`/api/booklog?u=${encodeURIComponent(booklogId)}`, {
+    signal: AbortSignal.timeout(30_000),
+  })
+  if (!res.ok) throw new Error(`取得に失敗しました (${res.status})`)
+  const data = (await res.json()) as { items: BooklogBook[]; error?: string }
+  if (data.error) throw new Error(data.error)
+  return data.items ?? []
+}
+
 /* ── 本棚の重なり → フォロー候補 ─────────────────────
    「あなたと7冊重なっている人」。同じ本を読んでいる人こそ、
    地図を見に行く価値がある人なので、重なり冊数で候補を並べる。 */
