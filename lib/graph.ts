@@ -174,7 +174,7 @@ export function buildGraph(p: Payload, shelfOverride: ShelfOverride = null): Gra
     nodes[e.to].degree++
   })
 
-  // ── 階層を決める ─────────────────────────
+  // ── 階層を決める ──────────────────────────────
   // 概念 → 読んだ本 → そのどちらかに1ホップで繋がる本 → それ以外
   const core = new Set<number>()
   nodes.forEach((n) => {
@@ -196,7 +196,7 @@ export function buildGraph(p: Payload, shelfOverride: ShelfOverride = null): Gra
   }
 }
 
-/* ── 表示のためのヘルパー ────────────────────── */
+/* ── 表示のためのヘルパー ───────────────────────── */
 
 /** ネットワークのサイズ = 何段目まで出すか */
 export const DEPTHS: { id: number; label: string; tiers: Tier[] }[] = [
