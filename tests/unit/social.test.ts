@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildSocialGraph } from '@/lib/graph'
+import { attachFollowIslands, buildGraph } from '@/lib/graph'
+import { tinyPayload } from './fixtures'
 
 const input = {
   me: { id: 'u1', username: 'わたし' },
@@ -13,51 +14,41 @@ const input = {
     { follower: 'u3', followee: 'u1' },
   ],
   shelves: new Map([
-    ['u1', new Map([['夜と霧', 5], ['十角館の殺人', 4]])],
-    ['u2', new Map([['夜と霧', 3]])],
+    ['u2', new Map([['book_a', 3], ['isbn:9999', 5]])],
     ['u3', new Map<string, number>()],
   ]),
-  titles: new Map([
-    ['夜と霧', { title: '夜と霧', cat: 'mind' }],
-    ['十角館の殺人', { title: '十角館の殺人', cat: 'mys' }],
-  ]),
+  titles: new Map([['book_a', { title: '読了本A', cat: 'mys' }]]),
 }
 
-describe('buildSocialGraph: フォローの地図', () => {
-  it('自分が中央(0,0)、フォロー先が周囲に置かれる', () => {
-    const g = buildSocialGraph(input)
-    const me = g.nodes.find((n) => n.key === 'acct:u1')!
-    const other = g.nodes.find((n) => n.key === 'acct:u2')!
-    expect(me.x).toBe(0)
-    expect(me.y).toBe(0)
-    expect(Math.hypot(other.x, other.y)).toBeGreaterThan(400)
-    expect(me.kind).toBe('account')
+describe('attachFollowIslands: 自分の図の周縁にフォローの島', () => {
+  it('自分の全体図は保たれ、島が外側に足される', () => {
+    const base = buildGraph(tinyPayload())
+    const baseCount = base.nodes.length
+    const g = attachFollowIslands(base, input)
+    expect(g.nodes.length).toBe(baseCount + 3 + 2) // アカウント3 + 島の本2
+    const island = g.nodes.find((n) => n.key === 'acct:u2')!
+    expect(Math.hypot(island.x, island.y)).toBeGreaterThan(1000) // 図の外側
+    const meAcct = g.nodes.find((n) => n.key === 'acct:u1')!
+    expect(meAcct.x).toBe(0) // 自分のアンカーは中央
   })
 
-  it('本棚がアカウントごとのクラスタになり、所属エッジで繋がる', () => {
-    const g = buildSocialGraph(input)
-    const myBooks = g.nodes.filter((n) => n.key.startsWith('u1::'))
-    expect(myBooks).toHaveLength(2)
-    const members = g.edges.filter((e) => e.type === 'member')
-    expect(members).toHaveLength(3) // u1:2冊 + u2:1冊
+  it('島の本は別ノード（図は分ける方針）', () => {
+    const g = attachFollowIslands(buildGraph(tinyPayload()), input)
+    expect(g.nodes.find((n) => n.key === 'u2::book_a')).toBeDefined()
+    expect(g.nodes.find((n) => n.key === 'book_a')).toBeDefined() // 自分側はそのまま
   })
 
-  it('フォロー線が張られる', () => {
-    const g = buildSocialGraph(input)
-    const follows = g.edges.filter((e) => e.type === 'follow')
-    expect(follows).toHaveLength(3)
+  it('同じ本を読んでいると島と島の橋（overlap）が架かる', () => {
+    const g = attachFollowIslands(buildGraph(tinyPayload()), input)
+    const bridges = g.edges.filter((e) => e.type === 'overlap')
+    expect(bridges).toHaveLength(1) // book_a のみ（isbn:9999 は自分の図に無い）
+    expect(g.nodes[bridges[0].from].key).toBe('book_a')
+    expect(g.nodes[bridges[0].to].key).toBe('u2::book_a')
   })
 
-  it('同じ本を読んでいる者どうしに橋が架かる', () => {
-    const g = buildSocialGraph(input)
-    const bridges = g.edges.filter((e) => e.why === '同じ本を読んでいる')
-    expect(bridges).toHaveLength(1) // 夜と霧: u1 と u2
-    const [a, b] = [g.nodes[bridges[0].from].key, g.nodes[bridges[0].to].key]
-    expect([a, b].every((k) => k.endsWith('::夜と霧'))).toBe(true)
-  })
-
-  it('隣接リストが破綻していない', () => {
-    const g = buildSocialGraph(input)
+  it('フォロー線と隣接リストが破綻していない', () => {
+    const g = attachFollowIslands(buildGraph(tinyPayload()), input)
+    expect(g.edges.filter((e) => e.type === 'follow')).toHaveLength(3)
     for (const adj of g.adjacency) for (const ei of adj) expect(g.edges[ei]).toBeDefined()
   })
 })
