@@ -36,6 +36,17 @@ export interface BondChip {
   mine: number | null
 }
 
+/** 概念に属する本（誰が紐付けたかで絞り込めるように、自分の値と総数を持つ） */
+export interface ConceptBook {
+  key: string
+  /** グラフ上のノード。地図に無い本は -1 */
+  index: number
+  title: string
+  supporters: number
+  strength: number
+  mine: number | null
+}
+
 type Rel = { node: number; type: RelationType; why: string }
 
 function RelList({ items, nodes, onSelect }: { items: Rel[]; nodes: BookNode[]; onSelect: (i: number) => void }) {
@@ -66,7 +77,7 @@ function RelList({ items, nodes, onSelect }: { items: Rel[]; nodes: BookNode[]; 
 
 export default function DetailPanel({
   node, nodes, incoming, outgoing, canRate, onRate, onSelect, onClose,
-  chips, bonds, shelfBooks, linkedBookKeys, allConcepts, onSetTie, onSetBond, onCreateConcept, onViewAccount, onAuthorClick,
+  chips, bonds, conceptBooks, shelfBooks, linkedBookKeys, allConcepts, onSetTie, onSetBond, onCreateConcept, onViewAccount, onAuthorClick,
 }: {
   node: BookNode
   nodes: BookNode[]
@@ -79,6 +90,8 @@ export default function DetailPanel({
   /** この本に付いている概念（投票数つき） */
   chips: ConceptChip[]
   bonds: BondChip[]
+  /** 概念ノードのとき: 属する本の一覧（自分/他の人/全員で絞り込む） */
+  conceptBooks: ConceptBook[]
   /** 自分の本棚（概念側から紐付ける候補 = 読んだことがある本だけ） */
   shelfBooks: { key: string; title: string }[]
   /** この概念に既に紐付いている本のキー */
@@ -190,24 +203,30 @@ export default function DetailPanel({
           {s}
         </span>
       ))}
-      {incoming.length > 0 && (
+      {isConcept ? (
+        <ConceptMembers books={conceptBooks} loggedIn={canRate} node={node} onSelect={onSelect} onSetTie={onSetTie} />
+      ) : (
         <>
-          <p className="mb-1 mt-3 text-[10px] tracking-[0.05em] text-dim">
-            ▸ {isConcept ? 'この概念に属する' : 'この本に向かっている'} ({incoming.length})
-          </p>
-          <RelList items={incoming} nodes={nodes} onSelect={onSelect} />
+          {incoming.length > 0 && (
+            <>
+              <p className="mb-1 mt-3 text-[10px] tracking-[0.05em] text-dim">
+                ▸ この本に向かっている ({incoming.length})
+              </p>
+              <RelList items={incoming} nodes={nodes} onSelect={onSelect} />
+            </>
+          )}
+          {outgoing.length > 0 && (
+            <>
+              <p className="mb-1 mt-3 text-[10px] tracking-[0.05em] text-dim">
+                ▸ ここから伸びている ({outgoing.length})
+              </p>
+              <RelList items={outgoing} nodes={nodes} onSelect={onSelect} />
+            </>
+          )}
+          {incoming.length === 0 && outgoing.length === 0 && (
+            <p className="mt-2.5 text-[12px] text-muted">表示中の条件では、つながりがありません。</p>
+          )}
         </>
-      )}
-      {outgoing.length > 0 && (
-        <>
-          <p className="mb-1 mt-3 text-[10px] tracking-[0.05em] text-dim">
-            ▸ {isConcept ? 'この概念に属する' : 'ここから伸びている'} ({outgoing.length})
-          </p>
-          <RelList items={outgoing} nodes={nodes} onSelect={onSelect} />
-        </>
-      )}
-      {incoming.length === 0 && outgoing.length === 0 && (
-        <p className="mt-2.5 text-[12px] text-muted">表示中の条件では、つながりがありません。</p>
       )}
     </aside>
   )
@@ -342,6 +361,103 @@ function ConceptChips({
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+/* ── 概念に属する本（ビューモード: 自分 / 他の人 / 全員） ─────── */
+
+type MemberView = 'mine' | 'others' | 'all'
+
+const MEMBER_VIEWS: { id: MemberView; label: string; hint: string }[] = [
+  { id: 'mine', label: '自分', hint: '自分が紐付けた本だけ' },
+  { id: 'others', label: '他の人', hint: '他のアカウントが紐付けた本' },
+  { id: 'all', label: '全員', hint: '全員の紐付け（平均強度つき）' },
+]
+
+function ConceptMembers({
+  books, loggedIn, node, onSelect, onSetTie,
+}: {
+  books: ConceptBook[]
+  loggedIn: boolean
+  node: BookNode
+  onSelect: (i: number) => void
+  onSetTie: (conceptKey: string, bookKey: string, strength: number | null) => void
+}) {
+  const [view, setView] = useState<MemberView>(loggedIn ? 'mine' : 'all')
+  const [open, setOpen] = useState<string | null>(null)
+
+  const filtered = books.filter((b) => {
+    const othersCount = b.supporters - (b.mine !== null ? 1 : 0)
+    if (view === 'mine') return b.mine !== null
+    if (view === 'others') return othersCount > 0
+    return true
+  })
+
+  return (
+    <div className="mt-2">
+      <div className="mb-1.5 flex items-center gap-1">
+        <p className="m-0 mr-1 text-[10px] tracking-[0.05em] text-dim">▸ 属する本</p>
+        {MEMBER_VIEWS.map((v) => (
+          <button
+            key={v.id}
+            onClick={() => setView(v.id)}
+            title={v.hint}
+            className={`rounded-full border px-2 py-[3px] text-[10px] ${
+              view === v.id
+                ? 'border-[#7c6bd6] bg-[#a78bfa]/20 text-[#e9d5ff]'
+                : 'border-line text-dim'
+            }`}
+          >
+            {v.label}
+          </button>
+        ))}
+      </div>
+      {filtered.length === 0 && (
+        <p className="m-0 text-[11.5px] leading-relaxed text-muted">
+          {view === 'mine'
+            ? 'まだ自分の紐付けがありません。下の「＋ 読んだ本から紐付ける」からどうぞ。'
+            : view === 'others'
+              ? '他のアカウントの紐付けはまだありません。'
+              : 'まだ紐付けがありません。'}
+        </p>
+      )}
+      <ul className="m-0 list-none p-0">
+        {filtered.map((b) => {
+          const othersCount = b.supporters - (b.mine !== null ? 1 : 0)
+          return (
+            <li key={b.key} className="border-b border-[#20252e] py-[7px] text-[12px] leading-[1.5] last:border-b-0">
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => (b.index >= 0 ? onSelect(b.index) : undefined)}
+                  className={`min-w-0 flex-1 truncate text-left ${b.index >= 0 ? 'active:text-acc' : 'cursor-default text-muted'}`}
+                >
+                  {b.title}
+                </button>
+                <span className="flex-none text-[10px] tabular-nums text-[#c4b5fd]">
+                  {view === 'mine' && b.mine !== null ? `★${b.mine}` : b.strength.toFixed(1)}
+                </span>
+                <span className="flex-none text-[9.5px] tabular-nums text-dim">
+                  {view === 'others' ? `${othersCount}人` : `${b.supporters}人`}
+                </span>
+                {loggedIn && (
+                  <button
+                    onClick={() => setOpen(open === b.key ? null : b.key)}
+                    className="flex-none rounded-full border border-line px-1.5 py-px text-[9.5px] text-dim active:text-text"
+                  >
+                    {b.mine !== null ? '編集' : '紐付け'}
+                  </button>
+                )}
+              </div>
+              {open === b.key && (
+                <span className="mt-1 inline-flex items-center gap-1 rounded-lg border border-line bg-panel2 px-1.5 py-1">
+                  <StarStrength value={b.mine} onPick={(st) => { onSetTie(node.key, b.key, st); setOpen(null) }} />
+                </span>
+              )}
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }
