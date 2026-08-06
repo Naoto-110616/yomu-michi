@@ -178,7 +178,7 @@ export function buildGraph(p: Payload): Graph {
   }
 }
 
-/* ── 表示のためのヘルパー ───────────────────── */
+/* ── 表示のためのヘルパー ───────────────────────── */
 
 /** ネットワークのサイズ = 何段目まで出すか */
 export const DEPTHS: { id: number; label: string; tiers: Tier[] }[] = [

@@ -176,7 +176,7 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
   ctx.globalAlpha = 1
 }
 
-/* ── 座標変換 / ヒットテスト ───────────────────── */
+/* ── 座標変換 / ヒットテスト ─────────────────────── */
 
 export const toWorld = (T: Transform, sx: number, sy: number) => ({
   x: (sx - T.x) / T.k,
