@@ -8,11 +8,12 @@ import {
 import { Simulation } from '@/lib/simulation'
 import { fitTransform, hitTest, render, toWorld, type RenderState, type Transform } from '@/lib/render'
 import { getSupabase } from '@/lib/supabase'
-import { EMPTY_OVERLAY, bondPair, fetchOverlay, fetchPersonalView, fetchSocial, ndlKey, normalizeTitleKey, type NdlItem, type Overlay, type Profile } from '@/lib/overlay'
+import { EMPTY_OVERLAY, bondPair, fetchOverlay, fetchPersonalView, fetchSocial, ndlKey, normalizeTitleKey, type NdlItem, type Overlay, type Profile, type Proposal } from '@/lib/overlay'
 import AccountMenu, { type SessionUser } from './AccountMenu'
 import Controls from './Controls'
 import DetailPanel from './DetailPanel'
 import Legend from './Legend'
+import ProposalDock from './ProposalDock'
 
 /** タップとドラッグの境界（px）。これ未満の移動はクリック扱いで、物理は一切動かさない */
 const DRAG_THRESHOLD = 4
@@ -614,7 +615,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     const buf = await file.arrayBuffer()
     let text = ''
     try { text = new TextDecoder('shift_jis').decode(buf) } catch { /* fallthrough */ }
-    if (!text || text.includes('\\ufffd')) text = new TextDecoder().decode(buf)
+    if (!text || text.includes('�')) text = new TextDecoder().decode(buf)
 
     const parseLine = (line: string): string[] => {
       const out: string[] = []
@@ -623,9 +624,9 @@ export default function Atlas({ payload }: { payload: Payload }) {
       for (let i = 0; i < line.length; i++) {
         const c = line[i]
         if (q) {
-          if (c === '\"') { if (line[i + 1] === '\"') { cur += '\"'; i++ } else q = false }
+          if (c === '"') { if (line[i + 1] === '"') { cur += '"'; i++ } else q = false }
           else cur += c
-        } else if (c === '\"') q = true
+        } else if (c === '"') q = true
         else if (c === ',') { out.push(cur); cur = '' }
         else cur += c
       }
@@ -636,7 +637,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     const bakedKeys = new Set(payload.n.map((a) => a[11]))
     const shelfRows: { user_id: string; book_key: string; star: number }[] = []
     const bookRows: { key: string; isbn: string | null; title: string; author: string; cat: string; created_by: string }[] = []
-    for (const line of text.split(/\\r?\\n/)) {
+    for (const line of text.split(/\r?\n/)) {
       if (!line.trim()) continue
       const f = parseLine(line)
       if (f.length < 13) continue
@@ -645,7 +646,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
       if (status !== '読み終わった' && status !== 'いま読んでる') continue
       const title = f[11]?.trim()
       if (!title) continue
-      const isbn = /^97[89]\\d{10}$/.test(f[2]?.trim() ?? '') ? f[2].trim() : ''
+      const isbn = /^97[89]\d{10}$/.test(f[2]?.trim() ?? '') ? f[2].trim() : ''
       const star = /^[1-5]$/.test(f[4]?.trim() ?? '') ? Number(f[4].trim()) : 0
       const norm = normalizeTitleKey(title)
       const key = bakedKeys.has(norm) ? norm : isbn ? `isbn:${isbn}` : norm
@@ -662,6 +663,28 @@ export default function Atlas({ payload }: { payload: Payload }) {
     reloadOverlay()
     return shelfRows.length
   }, [user, payload, reloadOverlay])
+
+  /* ── AI推論ループの判定（検証ループ = 唯一の必須ユーザー操作） ──
+     合ってる → 自分の紐付けとして実体化し、破線が実線になる。
+     違う     → 記録だけ残して線は消える（AIの却下率に反映される）。
+     保留     → 自分のキューから外れるだけで、他の人には出続ける。 */
+  const vote = useCallback(async (p: Proposal, v: 'yes' | 'no' | 'unsure') => {
+    const sb = getSupabase()
+    if (!sb || !user) return
+    await sb.from('verdicts').upsert({ proposal_id: p.id, user_id: user.id, vote: v })
+    if (v === 'yes') {
+      if (p.kind === 'member') {
+        await sb.from('concept_links').upsert({
+          concept_key: p.from, book_key: p.to, user_id: user.id, strength: 3,
+        })
+      } else {
+        await sb.from('book_links').upsert({
+          from_key: p.from, to_key: p.to, rel: p.kind, user_id: user.id, strength: 3,
+        })
+      }
+    }
+    reloadOverlay()
+  }, [user, reloadOverlay])
 
   /* ── フォロー ───────────────────────────── */
   const toggleFollow = useCallback(async (profileId: string, on: boolean) => {
@@ -699,6 +722,8 @@ export default function Atlas({ payload }: { payload: Payload }) {
     for (const n of graph.nodes) c[n.cat] = (c[n.cat] ?? 0) + 1
     return c
   }, [graph])
+
+  const keyTitle = useMemo(() => new Map(graph.nodes.map((n) => [n.key, n.title])), [graph])
 
   const toggle = <T,>(set: Set<T>, v: T): Set<T> => {
     const next = new Set(set)
@@ -776,6 +801,15 @@ export default function Atlas({ payload }: { payload: Payload }) {
       <div ref={wrapRef} className="relative min-h-0 flex-1 touch-none overflow-hidden">
         <canvas ref={canvasRef} className="block h-full w-full" />
         {!controlsOpen && <Legend />}
+        {!viewing && (
+          <ProposalDock
+            proposals={overlay.proposals}
+            titleOf={(k) => keyTitle.get(k) ?? k.replace(/^cat:/, '')}
+            canVote={!!user}
+            selectedKey={selected !== null ? graph.nodes[selected].key : null}
+            onVote={vote}
+          />
+        )}
         {selected !== null && relations && (
           <DetailPanel
             node={graph.nodes[selected]}
