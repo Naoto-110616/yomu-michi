@@ -1,0 +1,43 @@
+name: ISBN backfill
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 18 * * 0'   # 毎週日曜 18:00 UTC に少しずつ埋める（自己修復）
+  push:
+    branches: [main]
+    paths: ['pipeline/isbn_backfill.py']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: isbn
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install numpy
+      - run: npm install
+      - run: npm run data          # graph.raw.json を作る
+      - name: NDL で ISBN を逆引き
+        run: python3 pipeline/isbn_backfill.py
+      - name: 変化があればコミット（デプロイが自動で走る）
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add pipeline/isbn_map.json pipeline/isbn_miss.json
+          if ! git diff --cached --quiet; then
+            n=$(python3 -c "import json;print(len(json.load(open('pipeline/isbn_map.json'))))" 2>/dev/null || echo '?')
+            git commit -m "ISBNを補完（累計 ${n} 件 → 全書影・図書館直リンクが有効に）"
+            git push
+          fi
