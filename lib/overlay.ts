@@ -21,6 +21,8 @@ export interface OverlayConcept {
   label: string
   description: string
   official: boolean
+  /** 作成者。自分が作った概念は紐付けゼロでも自分の地図に出す */
+  createdBy: string | null
 }
 export interface OverlayLink {
   concept: string
@@ -93,7 +95,7 @@ export async function fetchOverlay(userId: string | null): Promise<Overlay> {
   const [strength, bonds, concepts, books, profiles, mineLinks, mineBonds, follows, proposals, myVerdicts] = await Promise.all([
     sb.from('concept_link_strength').select('concept_key, book_key, supporters, strength'),
     sb.from('book_link_strength').select('from_key, to_key, rel, supporters, strength'),
-    sb.from('concepts').select('key, label, description, official'),
+    sb.from('concepts').select('key, label, description, official, created_by'),
     sb.from('books').select('key, title, author, year, cat, isbn'),
     sb.from('profiles').select('id, username'),
     userId ? sb.from('concept_links').select('concept_key, book_key, strength').eq('user_id', userId) : Promise.resolve({ data: [] }),
@@ -121,6 +123,7 @@ export async function fetchOverlay(userId: string | null): Promise<Overlay> {
     concepts: (concepts.data ?? []).map((r) => ({
       key: r.key as string, label: r.label as string,
       description: (r.description as string) ?? '', official: !!r.official,
+      createdBy: (r.created_by as string) ?? null,
     })),
     books: (books.data ?? []).map((r) => ({
       key: r.key as string, title: r.title as string, author: (r.author as string) ?? '',
