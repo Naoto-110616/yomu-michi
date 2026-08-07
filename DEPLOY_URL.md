@@ -2,5 +2,5 @@
 
 <https://yomu-michi.siodeitadaku.workers.dev>
 
-- 最終デプロイ: 2026-08-07 00:38 UTC
+- 最終デプロイ: 2026-08-07 07:06 UTC
 - 疎通確認: HTTP `200` / `35572` bytes
