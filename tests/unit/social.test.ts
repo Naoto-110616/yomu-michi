@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { attachFollowIslands, buildGraph } from '@/lib/graph'
+import { attachFollowIslands, attachOwnHub, buildGraph } from '@/lib/graph'
 import { tinyPayload } from './fixtures'
 
 const input = {
@@ -50,5 +50,50 @@ describe('attachFollowIslands: 自分の図の周縁にフォローの島', () =
     const g = attachFollowIslands(buildGraph(tinyPayload()), input)
     expect(g.edges.filter((e) => e.type === 'follow')).toHaveLength(3)
     for (const adj of g.adjacency) for (const ei of adj) expect(g.edges[ei]).toBeDefined()
+  })
+})
+
+describe('attachOwnHub: アカウント → 概念 → 本 の幹', () => {
+  function hubSetup(tied: string[]) {
+    const g = buildGraph(tinyPayload(), new Map([['book_a', 5], ['book_b', 3]]), {
+      books: [], concepts: [
+        { key: 'cat:phil', label: '哲学・思想', description: '', official: true, createdBy: null },
+      ], links: [], bonds: [],
+    })
+    const withMe = attachFollowIslands(g, {
+      me: { id: 'me', username: 'わたし' },
+      accounts: [], follows: [], shelves: new Map(),
+      titles: new Map(),
+    })
+    return attachOwnHub(withMe, {
+      meKey: 'acct:me',
+      ownConceptKeys: new Set(['cat:phil']),
+      tiedBookKeys: new Set(tied),
+    })
+  }
+
+  it('自分の概念へ hub=concept の線、未整理の本へ hub=book の点線が張られる', () => {
+    const g = hubSetup([])
+    const hubs = g.edges.filter((e) => e.hub)
+    const conceptHub = hubs.find((e) => e.hub === 'concept')
+    expect(conceptHub).toBeDefined()
+    expect(g.nodes[conceptHub!.to].key).toBe('cat:phil')
+    // 読了2冊（book_a, book_b）が未整理としてアカウント直結
+    expect(hubs.filter((e) => e.hub === 'book')).toHaveLength(2)
+    expect(conceptHub!.dist).toBeGreaterThan(0) // バネの上書きを持つ
+  })
+
+  it('概念に紐づけた本はアカウント直結から外れる（=概念側へ移動する）', () => {
+    const g = hubSetup(['book_a'])
+    const bookHubs = g.edges.filter((e) => e.hub === 'book')
+    expect(bookHubs).toHaveLength(1)
+    expect(g.nodes[bookHubs[0].to].key).toBe('book_b') // 残るのは未整理のbのみ
+  })
+
+  it('アカウントノードが無ければ何もしない（ゲスト）', () => {
+    const g = buildGraph(tinyPayload())
+    const before = g.edges.length
+    const after = attachOwnHub(g, { meKey: 'acct:none', ownConceptKeys: new Set(), tiedBookKeys: new Set() })
+    expect(after.edges.length).toBe(before)
   })
 })
