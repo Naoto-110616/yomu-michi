@@ -41,6 +41,9 @@ interface SimLink {
   source: SimNode | number
   target: SimNode | number
   type: RelationType
+  /** エッジ単位の上書き（自分のハブ構造など）。無ければ関係タイプの既定値 */
+  dist?: number
+  pull?: number
 }
 
 /** バネの自然長。所属（概念→本）は短く、対立は長く */
@@ -68,8 +71,8 @@ export class Simulation {
   private sim: D3Simulation<SimNode, never>
   private linkForce = forceLink<SimNode, SimLink>()
     .id((d) => d.id)
-    .distance((l) => DISTANCE[l.type])
-    .strength((l) => STRENGTH[l.type])
+    .distance((l) => l.dist ?? DISTANCE[l.type])
+    .strength((l) => l.pull ?? STRENGTH[l.type])
 
   constructor(graph: Graph, inherit?: Simulation) {
     const n = graph.nodes.length
@@ -134,7 +137,7 @@ export class Simulation {
       .filter((ei) => !graph.edges[ei].status)
       .map((ei) => {
         const e = graph.edges[ei]
-        return { source: e.from, target: e.to, type: e.type }
+        return { source: e.from, target: e.to, type: e.type, dist: e.dist, pull: e.pull }
       })
     this.sim.nodes(subset)
     this.linkForce.links(links as never)
