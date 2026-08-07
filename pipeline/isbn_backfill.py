@@ -68,3 +68,4 @@ print(f'done: resolved={len(isbn_map)} misses={len(misses)}')
 
 # NOTE: pushing this file triggers .github/workflows/isbn.yml (first run bootstrap).
 # retry: 2026-08-06T15:40Z CI outage recovery
+# retry-2: 2026-08-07T00:15Z after Actions recovery
