@@ -124,6 +124,15 @@ export interface Edge {
    * undefined = 検証済み・または人が張った実エッジ
    */
   status?: 'proposed' | 'disputed'
+  /**
+   * 自分のアカウントを幹にする階層の線。
+   *   concept = アカウント → 自分の概念（自分の軸）
+   *   book    = アカウント → 未整理の本（概念に紐づけるとこの線は消え、概念側へ移動する）
+   */
+  hub?: 'concept' | 'book'
+  /** バネの自然長・強さのエッジ単位の上書き（hub用。未指定なら関係タイプの既定値） */
+  dist?: number
+  pull?: number
 }
 
 export interface Payload {
@@ -157,7 +166,7 @@ export type ShelfOverride = Map<string, number> | null
 
 export interface GraphOverlay {
   books: { key: string; title: string; author: string; year: number; cat: string; isbn?: string }[]
-  concepts: { key: string; label: string; description: string; official: boolean }[]
+  concepts: { key: string; label: string; description: string; official: boolean; createdBy?: string | null }[]
   links: { concept: string; book: string; supporters: number; strength: number }[]
   bonds: { from: string; to: string; rel: 'pre' | 'next' | 'alt' | 'counter'; supporters: number; strength: number }[]
   /** AI推論ループの提案。proposed / disputed だけが破線エッジとして地図に載る */
@@ -425,6 +434,54 @@ export function matchesQuery(n: BookNode, q: string): boolean {
   return (n.title + n.author + n.desc + n.sources.join('')).toLowerCase().includes(q.toLowerCase())
 }
 
+
+/* ── 自分のハブ構造: アカウント → 概念 → 本 ─────────────
+   ログイン中の地図の幹。自分のアカウントノードから
+     - 自分の概念（紐付けた/作った軸）へ線が伸び、
+     - どの概念にも紐づいていない本は「未整理」としてアカウント直結になる。
+   本を概念に紐づけた瞬間、アカウント直結の線は消えて概念側の線に移る
+   = 整理が進むほど、本がアカウントの周りから概念のクラスタへ滑っていく。 */
+
+export interface OwnHubInput {
+  /** 自分のアカウントノードのキー（acct:{userId}） */
+  meKey: string
+  /** 自分の軸（紐付けた or 作った概念のキー） */
+  ownConceptKeys: Set<string>
+  /** 自分がいずれかの概念に紐づけた本のキー */
+  tiedBookKeys: Set<string>
+}
+
+export function attachOwnHub(g: Graph, input: OwnHubInput): Graph {
+  const me = g.nodes.find((n) => n.key === input.meKey)
+  if (!me) return g
+  const edges = g.edges
+
+  for (const n of g.nodes) {
+    if (n.kind === 'concept' && input.ownConceptKeys.has(n.key)) {
+      edges.push({
+        from: me.i, to: n.i, type: 'member', hub: 'concept',
+        why: '自分の軸', weight: 1, dist: 230, pull: 0.08,
+      })
+    }
+    // 島の本（key に :: を含む）は他人の本棚なので対象外
+    if (n.kind === 'book' && n.shelf && !n.key.includes('::') && !input.tiedBookKeys.has(n.key)) {
+      edges.push({
+        from: me.i, to: n.i, type: 'member', hub: 'book',
+        why: '未整理 — 概念に紐づけると、その概念のそばへ移動します', weight: 1, dist: 150, pull: 0.04,
+      })
+    }
+  }
+
+  const adjacency: number[][] = g.nodes.map(() => [])
+  for (const n of g.nodes) n.degree = 0
+  edges.forEach((e, i) => {
+    adjacency[e.from].push(i)
+    adjacency[e.to].push(i)
+    g.nodes[e.from].degree++
+    g.nodes[e.to].degree++
+  })
+  return { ...g, adjacency, meta: { ...g.meta, edges: edges.length } }
+}
 
 /* ── フォローの島 ─────────────────────────────────
    自分の全体図はそのまま中央に。フォローしている人の地図は
