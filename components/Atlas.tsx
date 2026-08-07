@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  CATEGORIES, DEFAULT_DEPTH, DEPTHS, RELATIONS, baseOpacity, attachFollowIslands, buildGraph, matchesQuery, nodeRadius,
+  CATEGORIES, DEFAULT_DEPTH, DEPTHS, RELATIONS, baseOpacity, attachFollowIslands, attachOwnHub, buildGraph, matchesQuery, nodeRadius,
   type Category, type Payload, type RelationType, type ShelfOverride, type ViewMode,
 } from '@/lib/graph'
 import { Simulation } from '@/lib/simulation'
@@ -131,15 +131,43 @@ export default function Atlas({ payload }: { payload: Payload }) {
     return m
   }, [payload, overlay.books])
 
+  /* ── 自分の軸と、概念に紐づけ済みの本 ─────────────
+     ハブ構造（アカウント→概念→本）と概念の表示判定の両方で使う。 */
+  const ownConceptKeys = useMemo(() => {
+    if (!user || viewing) return null
+    const s = new Set<string>()
+    for (const k of effectiveOverlay.mine.keys()) {
+      const parts = k.split('::')
+      if (parts.length === 2) s.add(parts[0]) // concept::book（3要素は本と本の紐付け）
+    }
+    for (const c of effectiveOverlay.concepts) if (c.createdBy === user.id) s.add(c.key)
+    return s
+  }, [user, viewing, effectiveOverlay])
+
+  const tiedBookKeys = useMemo(() => {
+    const s = new Set<string>()
+    for (const k of effectiveOverlay.mine.keys()) {
+      const parts = k.split('::')
+      if (parts.length === 2) s.add(parts[1])
+    }
+    return s
+  }, [effectiveOverlay])
+
   const graph = useMemo(() => {
     const g = buildGraph(payload, shelfOverride, effectiveOverlay)
     // ログイン中は自分の図の周縁にフォローの島を常設する（他人の地図の閲覧中は除く）
     if (user && social && !viewing) {
-      return attachFollowIslands(g, { ...social, titles: titleIndex })
+      const withIslands = attachFollowIslands(g, { ...social, titles: titleIndex })
+      // アカウントを幹に: 自分の概念へ線を張り、未整理の本はアカウント直結にする
+      return attachOwnHub(withIslands, {
+        meKey: `acct:${user.id}`,
+        ownConceptKeys: ownConceptKeys ?? new Set(),
+        tiedBookKeys,
+      })
     }
     return g
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payload, user?.id, userShelf, effectiveOverlay, viewing?.id, personal, social, titleIndex])
+  }, [payload, user?.id, userShelf, effectiveOverlay, viewing?.id, personal, social, titleIndex, ownConceptKeys, tiedBookKeys])
 
   // ノードごとの紐付け人数（大きさに反映）
   const boosts = useMemo(() => {
@@ -284,16 +312,6 @@ export default function Atlas({ payload }: { payload: Payload }) {
     //   他人の地図 = その人の紐付けがある概念
     //   ゲスト     = サンプル本棚に紐付いている概念
     // それ以外の概念は絞り込みのチップから選んだとき（selected 経由）だけ現れる。
-    const ownConceptKeys = (() => {
-      if (!user || viewing) return null
-      const s = new Set<string>()
-      for (const k of effectiveOverlay.mine.keys()) {
-        const parts = k.split('::')
-        if (parts.length === 2) s.add(parts[0]) // concept::book（3要素は本と本の紐付け）
-      }
-      for (const c of effectiveOverlay.concepts) if (c.createdBy === user.id) s.add(c.key)
-      return s
-    })()
     const activeConcepts = new Set<number>()
     for (const n of graph.nodes) {
       if (n.kind !== 'concept') continue
@@ -345,7 +363,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     sim.setVisible(graph, nodeIds, eids)
     setVisibleCount(nodeIds.size)
     kick()
-  }, [graph, sim, depth, categories, edgeTypes, mode, nodeScale, selected, boosts, kick, user, viewing, effectiveOverlay])
+  }, [graph, sim, depth, categories, edgeTypes, mode, nodeScale, selected, boosts, kick, ownConceptKeys])
 
   /* ── 強調（不透明度の目標値）。物理は動かさない ── */
   useEffect(() => {
