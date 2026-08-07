@@ -53,6 +53,21 @@ export function render(ctx: CanvasRenderingContext2D, s: RenderState) {
     const a = Math.min(fade[e.from], fade[e.to])
     if (a < 0.02) continue
 
+    // 自分のハブ構造: 未整理の本は「かすかな点線」、自分の軸（概念）は淡い実線。
+    // 主役は概念→本の線なので、幹の線は主張しない
+    if (e.hub) {
+      ctx.globalAlpha = a * (e.hub === 'concept' ? 0.5 : 0.18)
+      ctx.strokeStyle = '#a78bfa'
+      ctx.lineWidth = (e.hub === 'concept' ? 1.2 : 0.8) / k
+      ctx.setLineDash(e.hub === 'book' ? [2 / k, 5 / k] : [])
+      ctx.beginPath()
+      ctx.moveTo(P[e.from].x, P[e.from].y)
+      ctx.lineTo(P[e.to].x, P[e.to].y)
+      ctx.stroke()
+      ctx.setLineDash([])
+      continue
+    }
+
     // AIの未検証エッジ: 細かい破線でうっすら。disputed（賛否が割れた）は赤く残す
     if (e.status) {
       ctx.globalAlpha = a * (e.status === 'disputed' ? 0.55 : 0.32)
