@@ -1,9 +1,9 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
-const title = '読む道 — 本と本のあいだの地図'
+const title = '読む道 — 読んだ本が、知識の地図になる'
 const description =
-  '1002冊を「前提・発展・別視点・反論」の4種類の関係でつないだ地図。この本を読む前に何を読めばいいか、が線で見える。'
+  'あなたの本棚を「前提・発展・別視点・反論」の線でつなぐ読書のネットワーク図。ブクログのIDひとつで本棚がそのまま地図になり、AIの提案を1タップで判定するほど正確に育つ。'
 
 export const metadata: Metadata = {
   title,
