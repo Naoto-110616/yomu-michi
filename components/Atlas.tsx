@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  CATEGORIES, DEFAULT_DEPTH, DEPTHS, RELATIONS, baseOpacity, attachFollowIslands, attachOwnHub, buildGraph, matchesQuery, nodeRadius,
+  CATEGORIES, DEFAULT_DEPTH, DEPTHS, RELATIONS, baseOpacity, attachFollowIslands, attachOwnHub, buildGraph, effectiveTier, matchesQuery, nodeRadius,
   type Category, type Payload, type RelationType, type ShelfOverride, type ViewMode,
 } from '@/lib/graph'
 import { Simulation } from '@/lib/simulation'
@@ -335,8 +335,10 @@ export default function Atlas({ payload }: { payload: Payload }) {
       if (n.kind === 'account' || n.key.includes('::')) { nodeIds.add(n.i); return }
       // それ以外（動的に実体化した本も含む）は階層で判定する。
       // 読んだ本 = shelf、そこから紐づく本 = linked。誰かが実体化しただけの
-      // 無関係な本（far）は既定では出ない = 「自分が読んだものだけの地図」
-      if (!tiers.has(n.tier)) return
+      // 無関係な本（far）は既定では出ない = 「自分が読んだものだけの地図」。
+      // 階層は「表示中の概念 + 読んだ本」を核に測り直す（buildGraph の tier は
+      // 全概念が核なので、他人が紐づけた本まで linked になってしまう）
+      if (!tiers.has(effectiveTier(graph, n.i, activeConcepts))) return
       if (!categories.has(n.cat)) return
       if (mode === 'shelf' && !n.shelf) return
       nodeIds.add(n.i)
@@ -403,7 +405,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [controlsOpen, query, selected])
 
-  /* ── カメラ ─────────────────── */
+  /* ── カメラ ─────────────────────────── */
   const anim = useRef<number | null>(null)
   const focusOn = useCallback((ids: Iterable<number>) => {
     const mobile = size.current.w <= 640
@@ -850,7 +852,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     reloadOverlay()
   }, [user, graph, reloadOverlay])
 
-  /* ── フォロー ───────────────────── */
+  /* ── フォロー ─────────────────────────── */
   const toggleFollow = useCallback(async (profileId: string, on: boolean) => {
     const sb = getSupabase()
     if (!sb || !user) return
@@ -859,7 +861,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     reloadOverlay()
   }, [user, reloadOverlay])
 
-  /* ── 詳細パネル用 ───────────────────── */
+  /* ── 詳細パネル用 ───────────────────────── */
   const relations = useMemo(() => {
     if (selected === null) return null
     const incoming: { node: number; type: RelationType; why: string; weight: number }[] = []
@@ -996,6 +998,18 @@ export default function Atlas({ payload }: { payload: Payload }) {
           </button>
         )}
         {selected === null && <Legend />}
+        {/* 空の本棚の案内: 新規アカウントは何も表示されないのが正しい状態なので、次の一歩を示す */}
+        {user && !viewing && userShelf && userShelf.size === 0 && (
+          <div className="pointer-events-none absolute inset-x-0 top-[16%] z-[3] flex justify-center px-6">
+            <div className="max-w-[360px] rounded-2xl border border-line bg-panel/90 p-4 text-center shadow-xl backdrop-blur">
+              <p className="m-0 mb-1 text-[13.5px] font-bold">まだ本棚が空です</p>
+              <p className="m-0 text-[11.5px] leading-[1.85] text-muted">
+                右上のアカウントメニューから<b className="text-[#fcd34d]">ブクログ連携</b>（IDを入れるだけ）、
+                または「絞り込み → 世界の本を探す」で1冊ずつ追加すると、ここに地図が育ちはじめます。
+              </p>
+            </div>
+          </div>
+        )}
         <div className="absolute bottom-3 left-3 z-[4] flex flex-col items-start gap-2">
           {user && !viewing && untiedPlan.length > 0 && (
             <button
