@@ -220,7 +220,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
   filters.current = { mode, edgeTypes, categories, query, selected, hovered, nodeScale }
   const visibleEdges = useRef<number[]>([])
 
-  /* ── 描画ループ ─────────────────────────
+  /* ── 描画ループ ─────────────────────
      graph / sim / boosts はオーバーレイ到着で作り直されるため、ループから
      直接閉じ込めてはいけない。ref 経由で「その瞬間の最新一式」を読む。
 
@@ -303,7 +303,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     return () => ro.disconnect()
   }, [paintOnce])
 
-  /* ── 表示対象の計算 ───────────────────── */
+  /* ── 表示対象の計算 ───────────────── */
   useEffect(() => {
     const tiers = new Set(DEPTHS[depth].tiers)
     const nodeIds = new Set<number>()
@@ -403,7 +403,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [controlsOpen, query, selected])
 
-  /* ── カメラ ─────────────────────────── */
+  /* ── カメラ ─────────────────── */
   const anim = useRef<number | null>(null)
   const focusOn = useCallback((ids: Iterable<number>) => {
     const mobile = size.current.w <= 640
@@ -576,7 +576,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     }
   }, [snapshot, select, kick, paintOnce])
 
-  /* ── 初期表示 ───────────────────────── */
+  /* ── 初期表示 ───────────────────── */
   const didFit = useRef(false)
   useEffect(() => {
     if (didFit.current) return
@@ -850,7 +850,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     reloadOverlay()
   }, [user, graph, reloadOverlay])
 
-  /* ── フォロー ───────────────────────── */
+  /* ── フォロー ───────────────────── */
   const toggleFollow = useCallback(async (profileId: string, on: boolean) => {
     const sb = getSupabase()
     if (!sb || !user) return
@@ -859,7 +859,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     reloadOverlay()
   }, [user, reloadOverlay])
 
-  /* ── 詳細パネル用 ─────────────────────── */
+  /* ── 詳細パネル用 ───────────────────── */
   const relations = useMemo(() => {
     if (selected === null) return null
     const incoming: { node: number; type: RelationType; why: string; weight: number }[] = []
@@ -919,6 +919,14 @@ export default function Atlas({ payload }: { payload: Payload }) {
           </button>
         )}
         <div className="ml-auto flex flex-none items-center gap-1.5">
+          {authReady && !user && !showLp && (
+            <button
+              onClick={() => setShowLp(true)}
+              className="rounded-lg border border-[#3b3357] bg-[#a78bfa]/10 px-2.5 py-1.5 text-[11px] text-[#c4b5fd] active:bg-[#a78bfa]/20"
+            >
+              使い方
+            </button>
+          )}
           <AccountMenu
             user={user}
             shelfCount={user ? (userShelf?.size ?? null) : null}

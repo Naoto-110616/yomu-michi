@@ -43,7 +43,7 @@ test.afterAll(async () => {
   await new Promise((r) => server.close(r))
 })
 
-/* ── モックとヘルパー ─────────────────────── */
+/* ── モックとヘルパー ─────────────────── */
 
 /** 本番と同じ「オーバーレイ到着 → グラフ再構築」を必ず起こす */
 async function mockSupabase(page: Page, opts: { landing?: boolean } = {}) {
@@ -106,7 +106,7 @@ function collectErrors(page: Page): string[] {
   return errs
 }
 
-/* ── テスト本体 ───────────────────────────── */
+/* ── テスト本体 ─────────────────────── */
 
 test('初期表示後、物理が有限時間で完全に沈静化する（震え禁止）', async ({ page }) => {
   const errs = collectErrors(page)
@@ -127,7 +127,7 @@ test('回帰: オーバーレイでグラフが再構築された後もドラッ
   await page.waitForTimeout(2500)
   expect(await waitForStill(page)).toBe(true)
 
-  // ノードのある座標を掘む（概念ノードは大きいので当てやすい）
+  // ノードのある座標を掴む（概念ノードは大きいので当てやすい）
   await page.mouse.move(620, 440)
   await page.mouse.down()
   await page.mouse.move(626, 446) // 閾値を超えてドラッグ開始
@@ -217,24 +217,41 @@ test('AI推論ループ: 提案が検証カードに出て、未ログインで�
   expect(errs).toEqual([])
 })
 
-test('LP: 未ログインの初回訪問はサービス概要から入り、CTAで地図に降りる', async ({ page }) => {
+test('LP: サービス説明・使い方フロー・サインアップ・デモ動線がそろい、CTAで地図に降りる', async ({ page }) => {
   const errs = collectErrors(page)
   await mockSupabase(page, { landing: true })
   await page.goto(baseURL, { waitUntil: 'domcontentloaded' })
 
+  // ヒーロー: 目的の説明と3つの動線（はじめる / デモ / ログイン不要）
   await expect(page.getByRole('heading', { name: /知識の地図になる/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'はじめる — 無料' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'デモを見る' })).toBeVisible()
+
+  // 使い方フロー + 特徴
+  await expect(page.getByText('つかいかた — 4ステップ')).toBeVisible()
+  await expect(page.getByText('本棚をつなぐ')).toBeVisible()
   await expect(page.getByText('AIが線を張り、あなたは1タップ')).toBeVisible()
-  await expect(page.getByText('はじめかた')).toBeVisible()
+
+  // サインアップ: LP上でログイン / 新規登録が完結する
+  await expect(page.getByText('いますぐはじめる')).toBeVisible()
+  await page.getByRole('button', { name: '新規登録', exact: true }).click()
+  await expect(page.getByPlaceholder('パスワード（8文字以上）')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'メールで新規登録' })).toBeVisible()
 
   // CTA で LP が閉じ、後ろで動いていた実物の地図がそのまま前面になる
   await page.getByRole('button', { name: /地図をさわってみる — ログイン不要/ }).click()
-  await expect(page.getByText('はじめかた')).toBeHidden()
+  await expect(page.getByText('つかいかた — 4ステップ')).toBeHidden()
   await expect(page.locator('canvas')).toBeVisible()
+
+  // ゲストのヘッダーには「使い方」ボタンが残り、LPへ戻れる
+  await page.getByRole('button', { name: '使い方', exact: true }).click()
+  await expect(page.getByText('つかいかた — 4ステップ')).toBeVisible()
+  await page.getByRole('button', { name: /地図をさわってみる — ログイン不要/ }).click()
 
   // 同じタブ内のリロードでは再表示しない
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(800)
-  await expect(page.getByText('はじめかた')).toBeHidden()
+  await expect(page.getByText('つかいかた — 4ステップ')).toBeHidden()
   expect(errs).toEqual([])
 })
 
