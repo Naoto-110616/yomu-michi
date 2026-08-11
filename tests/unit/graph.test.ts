@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildGraph, nodeRadius } from '@/lib/graph'
+import { buildGraph, effectiveTier, nodeRadius } from '@/lib/graph'
 import { tinyPayload } from './fixtures'
 
 describe('buildGraph: 階層（概念 > 読んだ本 > 紐づく本 > その他）', () => {
@@ -35,6 +35,44 @@ describe('buildGraph: アカウントの本棚オーバーライド', () => {
   it('空の本棚なら読んだ本の層が消える', () => {
     const g = buildGraph(tinyPayload(), new Map())
     expect(g.nodes.filter((n) => n.tier === 'shelf')).toHaveLength(0)
+  })
+})
+
+describe('effectiveTier: 表示中の概念と読んだ本を核にした実効階層', () => {
+  it('空の本棚では、他人が概念に紐づけただけの本は far になる（新規アカウントのバグ回帰）', () => {
+    // 他人の紐付け（overlay.links）で全ての本が概念とつながっている状態を再現
+    const g = buildGraph(tinyPayload(), new Map(), {
+      books: [], concepts: [], bonds: [],
+      links: [
+        { concept: 'c_test', book: 'book_a', supporters: 2, strength: 4 },
+        { concept: 'c_test', book: 'book_c', supporters: 1, strength: 3 },
+      ],
+    })
+    // buildGraph の tier では linked に繰り上がってしまう…
+    expect(g.nodes.filter((n) => n.tier === 'linked').length).toBeGreaterThan(0)
+    // …が、実効階層では「立っている概念なし・読んだ本なし」なので全て far
+    const visible = new Set<number>() // 新規アカウント = 表示中の概念ゼロ
+    for (const n of g.nodes) {
+      if (n.kind !== 'concept') expect(effectiveTier(g, n.i, visible)).toBe('far')
+    }
+  })
+
+  it('読んだ本と、その隣だけが shelf / linked になる', () => {
+    const g = buildGraph(tinyPayload(), new Map([['book_a', 5]]))
+    const visible = new Set<number>()
+    const byKey = new Map(g.nodes.map((n) => [n.key, n.i]))
+    expect(effectiveTier(g, byKey.get('book_a')!, visible)).toBe('shelf')
+    expect(effectiveTier(g, byKey.get('book_c')!, visible)).toBe('linked') // Aの隣
+    expect(effectiveTier(g, byKey.get('book_d')!, visible)).toBe('far')
+  })
+
+  it('概念は「表示中」のときだけ隣の本を linked に繰り上げる', () => {
+    const g = buildGraph(tinyPayload(), new Map())
+    const byKey = new Map(g.nodes.map((n) => [n.key, n.i]))
+    const concept = byKey.get('c_test')!
+    const bookA = byKey.get('book_a')! // c_test の member
+    expect(effectiveTier(g, bookA, new Set())).toBe('far')
+    expect(effectiveTier(g, bookA, new Set([concept]))).toBe('linked')
   })
 })
 
