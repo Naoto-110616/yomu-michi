@@ -362,7 +362,7 @@ export function buildGraph(
     nodes[e.to].degree++
   })
 
-  // ── 階層を決める ──────────────────────────────
+  // ── 階層を決める ─────────────────────────────
   // 概念 → 読んだ本 → そのどちらかに1ホップで繋がる本 → それ以外
   const core = new Set<number>()
   nodes.forEach((n) => {
@@ -384,7 +384,7 @@ export function buildGraph(
   }
 }
 
-/* ── 表示のためのヘルパー ───────────────────────── */
+/* ── 表示のためのヘルパー ─────────────────────── */
 
 /** ネットワークのサイズ = 何段目まで出すか */
 export const DEPTHS: { id: number; label: string; tiers: Tier[] }[] = [
@@ -394,6 +394,27 @@ export const DEPTHS: { id: number; label: string; tiers: Tier[] }[] = [
   { id: 3, label: 'すべて',     tiers: ['concept', 'shelf', 'linked', 'far'] },
 ]
 export const DEFAULT_DEPTH = 2
+
+/**
+ * 「いま地図に立っている概念」と「読んだ本」を核にして階層を測り直す。
+ *
+ * buildGraph の tier は全概念を核にするため、他人が概念に紐づけただけの本まで
+ * 'linked' に繰り上がってしまう（新規アカウントの空の地図に、他人の本が
+ * 100冊近く現れるバグの原因）。表示側はこちらで判定する。
+ * AIの未検証エッジ（status）と自分のハブ線（hub）は核への接続と数えない。
+ */
+export function effectiveTier(g: Graph, i: number, visibleConcepts: Set<number>): Tier {
+  const n = g.nodes[i]
+  if (n.kind === 'concept') return 'concept'
+  if (n.shelf) return 'shelf'
+  for (const ei of g.adjacency[i]) {
+    const e = g.edges[ei]
+    if (e.status || e.hub) continue
+    const other = g.nodes[e.from === i ? e.to : e.from]
+    if (other.kind === 'concept' ? visibleConcepts.has(other.i) : other.shelf) return 'linked'
+  }
+  return 'far'
+}
 
 export function nodeRadius(n: BookNode, scale = 1, boost = 0): number {
   const base =
@@ -545,9 +566,9 @@ export function attachFollowIslands(base: Graph, input: SocialInput): Graph {
         x: cx + Math.cos(golden) * r, y: cy + Math.sin(golden) * r, tier: 'shelf',
       })
       edges.push({ from: acct.i, to: book.i, type: 'member', why: `${person.username} の本棚`, weight: 1 })
-      // 重なり: 自分の地図に同じ本があれば橋を架ける
+      // 重なり: 自分も読んでいる本にだけ橋を架ける（読んでいない焼き込みノードには架けない）
       const mine = byKey.get(bookKey)
-      if (mine !== undefined && !nodes[mine].dynamic) {
+      if (mine !== undefined && !nodes[mine].dynamic && nodes[mine].shelf) {
         edges.push({ from: mine, to: book.i, type: 'overlap', why: '同じ本を読んでいる', weight: 1 })
       }
       bi++
