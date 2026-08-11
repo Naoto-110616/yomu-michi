@@ -111,11 +111,33 @@ export default function Controls(props: {
   }
 }) {
   return (
+    // キャンバスを押し下げないオーバーレイ。開閉で地図がリサイズされないので
+    // 「ちょっと開いて、すぐ閉じる」が軽い。外側タップ（背面）でも閉じられる
     <div
-      className={`z-10 flex-none overflow-y-auto border-b border-line bg-panel transition-[max-height,padding] duration-300 ease-out ${
-        props.open ? 'max-h-[min(58vh,460px)] px-3.5 pb-3.5 pt-3' : 'max-h-0 overflow-hidden px-3.5 py-0'
+      className={`absolute inset-x-0 top-0 overflow-y-auto border-b border-line bg-panel shadow-2xl transition-[max-height,padding] duration-300 ease-out ${
+        // invisible はタブ移動やスクリーンリーダーから畳んだ中身を確実に外すため
+        props.open ? 'visible max-h-[min(58vh,460px)] px-3.5 pb-3.5 pt-3' : 'invisible max-h-0 overflow-hidden px-3.5 py-0'
       }`}
     >
+      {/* 地図内検索 — いちばん使う操作なので先頭。解除は右のボタン1タップ */}
+      <div className="mb-3 flex items-center gap-1.5">
+        <input
+          type="search"
+          value={props.query}
+          onChange={(e) => props.onQuery(e.target.value.trim())}
+          placeholder="タイトル・著者・概念で検索…"
+          className="min-w-0 flex-1 appearance-none rounded-[10px] border border-line bg-panel2 px-3 py-2.5 text-[13.5px] text-text outline-none placeholder:text-dim"
+        />
+        {props.query && (
+          <button
+            onClick={() => props.onQuery('')}
+            className="flex-none rounded-[10px] border border-line bg-panel2 px-3 py-2.5 text-[11.5px] text-muted active:text-text"
+          >
+            解除
+          </button>
+        )}
+      </div>
+
       {/* 世界の本を探す */}
       <p className="mb-1.5 text-[10px] tracking-[0.09em] text-dim">世界の本を探す</p>
       <div className="mb-3">
@@ -229,13 +251,6 @@ export default function Controls(props: {
         ))}
       </div>
 
-      <input
-        type="search"
-        value={props.query}
-        onChange={(e) => props.onQuery(e.target.value.trim())}
-        placeholder="タイトル・著者・概念で検索…"
-        className="w-full appearance-none rounded-[10px] border border-line bg-panel2 px-3 py-2.5 text-[13.5px] text-text outline-none placeholder:text-dim"
-      />
     </div>
   )
 }

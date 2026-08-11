@@ -62,7 +62,7 @@ export default function ProposalDock({
     return (
       <button
         onClick={() => setOpen(true)}
-        className="absolute bottom-3 left-3 z-[4] flex items-center gap-1.5 rounded-full border border-[#3b3357] bg-panel/95 px-3 py-1.5 text-[11.5px] text-[#c4b5fd] shadow-lg backdrop-blur active:bg-[#a78bfa]/15"
+        className="flex items-center gap-1.5 rounded-full border border-[#3b3357] bg-panel/95 px-3 py-1.5 text-[11.5px] text-[#c4b5fd] shadow-lg backdrop-blur active:bg-[#a78bfa]/15"
       >
         <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#a78bfa]" />
         AIの提案 {queue.length}件
@@ -71,7 +71,7 @@ export default function ProposalDock({
   }
 
   return (
-    <aside className="absolute bottom-3 left-3 z-[4] w-[min(320px,calc(100vw-24px))] rounded-[13px] border border-[#3b3357] bg-panel/[0.975] p-3 shadow-xl backdrop-blur">
+    <aside className="w-[min(320px,calc(100vw-24px))] rounded-[13px] border border-[#3b3357] bg-panel/[0.975] p-3 shadow-xl backdrop-blur">
       <div className="mb-1.5 flex items-center gap-1.5">
         <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#a78bfa]" />
         <p className="m-0 text-[10px] tracking-[0.1em] text-[#c4b5fd]">

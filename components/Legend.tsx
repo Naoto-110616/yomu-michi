@@ -1,11 +1,44 @@
+'use client'
+
+/**
+ * 凡例。右下に「?」チップとして畳んでおき、必要なときだけ開く。
+ * 左下は AI提案（ProposalDock）の定位置なので、重ならないよう右下に住む。
+ * 開閉の記憶は localStorage（初見の人には畳んだ状態 = 地図が主役）。
+ */
+import { useEffect, useState } from 'react'
 import { RELATIONS, RELATION_META } from '@/lib/graph'
 
 const STARS: [number, string][] = [[5, '#fbbf24'], [4, '#7dd3fc'], [3, '#86efac'], [2, '#f472b6']]
 
 export default function Legend() {
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    try { setOpen(localStorage.getItem('yomu:legend') === '1') } catch { /* no-op */ }
+  }, [])
+  const toggle = () => setOpen((v) => {
+    const next = !v
+    try { localStorage.setItem('yomu:legend', next ? '1' : '0') } catch { /* no-op */ }
+    return next
+  })
+
+  if (!open) {
+    return (
+      <button
+        onClick={toggle}
+        title="凡例を表示"
+        className="absolute bottom-2.5 right-2.5 z-[4] rounded-full border border-line bg-panel/85 px-2.5 py-1.5 text-[10.5px] text-muted shadow-lg backdrop-blur active:text-text"
+      >
+        凡例 ?
+      </button>
+    )
+  }
+
   return (
-    <div className="pointer-events-none absolute bottom-2.5 left-2.5 rounded-[10px] border border-line bg-panel/85 px-2.5 py-2 text-[10px] leading-[1.85] text-muted backdrop-blur max-[640px]:text-[9.5px]">
-      <b className="mb-0.5 block font-semibold text-text">線</b>
+    <div className="absolute bottom-2.5 right-2.5 z-[4] rounded-[10px] border border-line bg-panel/90 px-2.5 py-2 text-[10px] leading-[1.85] text-muted shadow-xl backdrop-blur max-[640px]:text-[9.5px]">
+      <div className="flex items-center">
+        <b className="font-semibold text-text">線</b>
+        <button onClick={toggle} className="-mr-1 ml-auto px-1.5 text-[13px] leading-none text-dim active:text-text">×</button>
+      </div>
       {RELATIONS.map((t) => {
         const m = RELATION_META[t]
         return (
