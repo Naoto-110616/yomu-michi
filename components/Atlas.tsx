@@ -8,7 +8,7 @@ import {
 import { Simulation } from '@/lib/simulation'
 import { fitTransform, hitTest, render, toWorld, type RenderState, type Transform } from '@/lib/render'
 import { getSupabase } from '@/lib/supabase'
-import { EMPTY_OVERLAY, bondPair, computeOverlaps, fetchAllShelves, fetchBooklogShelf, fetchOverlay, fetchPersonalView, fetchSocial, ndlKey, normalizeTitleKey, type NdlItem, type Overlay, type Profile, type Proposal } from '@/lib/overlay'
+import { EMPTY_OVERLAY, bondPair, computeOverlaps, fetchAllShelves, fetchBooklogShelf, fetchOverlay, fetchPersonalView, fetchSocial, ndlKey, normalizeTitleKey, planAutoTies, type NdlItem, type Overlay, type Profile, type Proposal } from '@/lib/overlay'
 import AccountMenu, { type SessionUser } from './AccountMenu'
 import Controls from './Controls'
 import DetailPanel from './DetailPanel'
@@ -220,7 +220,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
   filters.current = { mode, edgeTypes, categories, query, selected, hovered, nodeScale }
   const visibleEdges = useRef<number[]>([])
 
-  /* ── 描画ループ ─────────────────────────────
+  /* ── 描画ループ ─────────────────────────
      graph / sim / boosts はオーバーレイ到着で作り直されるため、ループから
      直接閉じ込めてはいけない。ref 経由で「その瞬間の最新一式」を読む。
 
@@ -303,7 +303,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     return () => ro.disconnect()
   }, [paintOnce])
 
-  /* ── 表示対象の計算 ───────────────────────── */
+  /* ── 表示対象の計算 ───────────────────── */
   useEffect(() => {
     const tiers = new Set(DEPTHS[depth].tiers)
     const nodeIds = new Set<number>()
@@ -389,7 +389,21 @@ export default function Atlas({ payload }: { payload: Payload }) {
 
   useEffect(() => () => { if (raf.current) cancelAnimationFrame(raf.current) }, [])
 
-  /* ── カメラ ─────────────────────────────── */
+  /* ── Esc: 開いているものを手前から順に閉じる（パネル → 検索 → 選択） ── */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      const el = document.activeElement
+      if (el instanceof HTMLElement && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return
+      if (controlsOpen) setControlsOpen(false)
+      else if (query) setQuery('')
+      else if (selected !== null) setSelected(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [controlsOpen, query, selected])
+
+  /* ── カメラ ─────────────────────────── */
   const anim = useRef<number | null>(null)
   const focusOn = useCallback((ids: Iterable<number>) => {
     const mobile = size.current.w <= 640
@@ -433,7 +447,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     return () => clearTimeout(t)
   }, [selected, graph, sim, edgeTypes, focusOn])
 
-  /* ── ポインタ操作 ──────────────────────────
+  /* ── ポインタ操作 ──────────────────────
      ノードの上で押しても、DRAG_THRESHOLD を超えるまではドラッグを開始しない。
      タップ（クリック）で物理が動くと「触るたびに震える」ため。 */
   useEffect(() => {
@@ -562,7 +576,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     }
   }, [snapshot, select, kick, paintOnce])
 
-  /* ── 初期表示 ───────────────────────────── */
+  /* ── 初期表示 ───────────────────────── */
   const didFit = useRef(false)
   useEffect(() => {
     if (didFit.current) return
@@ -594,6 +608,43 @@ export default function Atlas({ payload }: { payload: Payload }) {
       setUserShelf(new Map((data ?? []).map((r) => [r.book_key as string, r.star as number])))
     }
   }, [user])
+
+  /* ── カテゴリ → 概念の自動紐付け ─────────────────
+     「1冊ずつ紐づけるのは手間」への回答。本の領域(cat)から cat:* 概念へ
+     一旦自動で紐づけ、あとは個別に強度変更・付け替え・解除でカスタマイズ。
+     ignoreDuplicates なので手動の紐付けを上書きすることはない。 */
+  const autoTie = useCallback(async (
+    pairs: Iterable<[string, number]>, tied: Set<string>
+  ): Promise<number> => {
+    const sb = getSupabase()
+    if (!sb || !user) return 0
+    const conceptKeys = new Set(overlay.concepts.map((c) => c.key))
+    const rows = planAutoTies(pairs, tied, (k) => titleIndex.get(k)?.cat, conceptKeys)
+      .map((r) => ({ ...r, user_id: user.id }))
+    for (let i = 0; i < rows.length; i += 50) {
+      await sb.from('concept_links').upsert(rows.slice(i, i + 50), { ignoreDuplicates: true })
+    }
+    return rows.length
+  }, [user, overlay.concepts, titleIndex])
+
+  /** 未整理の本（自分の紐付けがゼロ）に対する自動紐付けの計画。件数をチップに出す */
+  const untiedPlan = useMemo(() => {
+    if (!user || viewing || !userShelf) return []
+    const conceptKeys = new Set(overlay.concepts.map((c) => c.key))
+    return planAutoTies(userShelf, tiedBookKeys, (k) => titleIndex.get(k)?.cat, conceptKeys)
+  }, [user, viewing, userShelf, tiedBookKeys, overlay.concepts, titleIndex])
+
+  const [tying, setTying] = useState(false)
+  const autoTieAll = useCallback(async () => {
+    if (!userShelf || tying) return
+    setTying(true)
+    try {
+      await autoTie(userShelf, tiedBookKeys)
+      reloadOverlay()
+    } finally {
+      setTying(false)
+    }
+  }, [userShelf, tiedBookKeys, autoTie, reloadOverlay, tying])
 
   /* ── 概念への紐付け: 強度 1-5 を付ける / null で外す ── */
   const setTie = useCallback(async (conceptKey: string, bookKey: string, strength: number | null) => {
@@ -656,9 +707,11 @@ export default function Atlas({ payload }: { payload: Payload }) {
       publisher: item.publisher, year: item.year, cat: 'lit', created_by: user.id,
     })
     await sb.from('shelf').upsert({ user_id: user.id, book_key: key, star: 0 })
+    // 登録した本はまず領域の概念へ自動で紐づける（あとから付け替え可能）
+    await autoTie([[key, 0]], tiedBookKeys)
     setUserShelf((prev) => new Map(prev ?? []).set(key, 0))
     reloadOverlay()
-  }, [user, reloadOverlay])
+  }, [user, reloadOverlay, autoTie, tiedBookKeys])
 
   /* ── ブクログCSVの取り込み（Shift_JIS対応・ヒューリスティック） ── */
   const importBooklogCsv = useCallback(async (file: File): Promise<number> => {
@@ -710,11 +763,14 @@ export default function Atlas({ payload }: { payload: Payload }) {
     }
     for (let i = 0; i < bookRows.length; i += 50) await sb.from('books').upsert(bookRows.slice(i, i + 50), { ignoreDuplicates: true })
     for (let i = 0; i < shelfRows.length; i += 50) await sb.from('shelf').upsert(shelfRows.slice(i, i + 50))
+    // 新しく棚に入った本は領域の概念へ自動で紐づける（再取り込みで手動の判断は上書きしない）
+    const known = new Set(userShelf?.keys() ?? [])
+    await autoTie(shelfRows.filter((r) => !known.has(r.book_key)).map((r) => [r.book_key, r.star] as [string, number]), tiedBookKeys)
     const { data } = await sb.from('shelf').select('book_key, star')
     setUserShelf(new Map((data ?? []).map((r) => [r.book_key as string, r.star as number])))
     reloadOverlay()
     return shelfRows.length
-  }, [user, payload, reloadOverlay])
+  }, [user, payload, reloadOverlay, userShelf, autoTie, tiedBookKeys])
 
   /* ── ブクログID連携: IDだけで本棚を再現・再同期 ─────────
      星1〜5の本を読了として取り込む（前提:「読んだ本には星を付けている」）。
@@ -748,13 +804,16 @@ export default function Atlas({ payload }: { payload: Payload }) {
     }
     for (let i = 0; i < bookRows.length; i += 50) await sb.from('books').upsert(bookRows.slice(i, i + 50), { ignoreDuplicates: true })
     for (let i = 0; i < shelfRows.length; i += 50) await sb.from('shelf').upsert(shelfRows.slice(i, i + 50))
+    // 新しく棚に入った本は領域の概念へ自動で紐づける（再同期で手動の判断は上書きしない）
+    const known = new Set(userShelf?.keys() ?? [])
+    await autoTie(shelfRows.filter((r) => !known.has(r.book_key)).map((r) => [r.book_key, r.star] as [string, number]), tiedBookKeys)
     await sb.from('profiles').update({ booklog_id: booklogId }).eq('id', user.id)
     setMyBooklogId(booklogId)
     const { data } = await sb.from('shelf').select('book_key, star')
     setUserShelf(new Map((data ?? []).map((r) => [r.book_key as string, r.star as number])))
     reloadOverlay()
     return shelfRows.length
-  }, [user, payload, reloadOverlay])
+  }, [user, payload, reloadOverlay, userShelf, autoTie, tiedBookKeys])
 
   /* ── AI推論ループの判定（検証ループ = 唯一の必須ユーザー操作） ──
      合ってる → 自分の紐付けとして実体化し、破線が実線になる。
@@ -791,7 +850,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     reloadOverlay()
   }, [user, graph, reloadOverlay])
 
-  /* ── フォロー ───────────────────────────── */
+  /* ── フォロー ───────────────────────── */
   const toggleFollow = useCallback(async (profileId: string, on: boolean) => {
     const sb = getSupabase()
     if (!sb || !user) return
@@ -800,7 +859,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     reloadOverlay()
   }, [user, reloadOverlay])
 
-  /* ── 詳細パネル用 ─────────────────────────── */
+  /* ── 詳細パネル用 ─────────────────────── */
   const relations = useMemo(() => {
     if (selected === null) return null
     const incoming: { node: number; type: RelationType; why: string; weight: number }[] = []
@@ -883,44 +942,72 @@ export default function Atlas({ payload }: { payload: Payload }) {
         </div>
       </header>
 
-      <Controls
-        open={controlsOpen}
-        depth={depth}
-        onDepth={setDepth}
-        nodeScale={nodeScale}
-        onNodeScale={setNodeScale}
-        mode={mode}
-        onMode={setMode}
-        edgeTypes={edgeTypes}
-        onEdgeType={(t) => setEdgeTypes((s) => toggle(s, t))}
-        edgeCounts={edgeCounts}
-        categories={categories}
-        onCategory={(c) => setCategories((s) => toggle(s, c))}
-        catCounts={catCounts}
-        query={query}
-        onQuery={setQuery}
-        concepts={graph.concepts.map((i) => graph.nodes[i])}
-        onPickConcept={select}
-        conceptCreate={{ loggedIn: !!user, onCreate: (label) => createConcept(label) }}
-        worldSearch={{
-          loggedIn: !!user,
-          knownKeys: new Set(graph.nodes.map((n) => n.key)),
-          onMaterialize: materialize,
-        }}
-      />
+      {/* 絞り込みはキャンバスを押し下げないオーバーレイ（zero-height アンカー） */}
+      <div className="relative z-30 flex-none">
+        <Controls
+          open={controlsOpen}
+          depth={depth}
+          onDepth={setDepth}
+          nodeScale={nodeScale}
+          onNodeScale={setNodeScale}
+          mode={mode}
+          onMode={setMode}
+          edgeTypes={edgeTypes}
+          onEdgeType={(t) => setEdgeTypes((s) => toggle(s, t))}
+          edgeCounts={edgeCounts}
+          categories={categories}
+          onCategory={(c) => setCategories((s) => toggle(s, c))}
+          catCounts={catCounts}
+          query={query}
+          onQuery={setQuery}
+          concepts={graph.concepts.map((i) => graph.nodes[i])}
+          onPickConcept={(i) => { select(i); setControlsOpen(false) }}
+          conceptCreate={{ loggedIn: !!user, onCreate: (label) => createConcept(label) }}
+          worldSearch={{
+            loggedIn: !!user,
+            knownKeys: new Set(graph.nodes.map((n) => n.key)),
+            onMaterialize: materialize,
+          }}
+        />
+      </div>
 
       <div ref={wrapRef} className="relative min-h-0 flex-1 touch-none overflow-hidden">
         <canvas ref={canvasRef} className="block h-full w-full" />
-        {!controlsOpen && <Legend />}
-        {!viewing && (
-          <ProposalDock
-            proposals={overlay.proposals}
-            titleOf={(k) => keyTitle.get(k) ?? k.replace(/^cat:/, '')}
-            canVote={!!user}
-            selectedKey={selected !== null ? graph.nodes[selected].key : null}
-            onVote={vote}
-          />
+        {/* パネルが開いている間は背面タップ = 閉じる */}
+        {controlsOpen && (
+          <div className="absolute inset-0 z-[6] bg-black/25" onClick={() => setControlsOpen(false)} />
         )}
+        {/* 検索の解除はパネルを開かず地図の上で1タップ */}
+        {query && (
+          <button
+            onClick={() => setQuery('')}
+            className="absolute left-3 top-3 z-[5] flex items-center gap-1.5 rounded-full border border-[#2f4a58] bg-panel/95 px-3 py-1.5 text-[11.5px] text-acc shadow-lg backdrop-blur active:bg-acc/10"
+          >
+            検索「{query.length > 12 ? query.slice(0, 11) + '…' : query}」
+            <span className="text-[14px] leading-none">×</span>
+          </button>
+        )}
+        {selected === null && <Legend />}
+        <div className="absolute bottom-3 left-3 z-[4] flex flex-col items-start gap-2">
+          {user && !viewing && untiedPlan.length > 0 && (
+            <button
+              onClick={autoTieAll}
+              disabled={tying}
+              className="flex items-center gap-1.5 rounded-full border border-[#14532d] bg-panel/95 px-3 py-1.5 text-[11.5px] text-[#86efac] shadow-lg backdrop-blur active:bg-[#22c55e]/15 disabled:opacity-50"
+            >
+              {tying ? '紐づけ中…' : <>未整理 {untiedPlan.length}冊を領域から自動紐づけ</>}
+            </button>
+          )}
+          {!viewing && (
+            <ProposalDock
+              proposals={overlay.proposals}
+              titleOf={(k) => keyTitle.get(k) ?? k.replace(/^cat:/, '')}
+              canVote={!!user}
+              selectedKey={selected !== null ? graph.nodes[selected].key : null}
+              onVote={vote}
+            />
+          )}
+        </div>
         {selected !== null && relations && (
           <DetailPanel
             node={graph.nodes[selected]}
