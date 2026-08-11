@@ -16,7 +16,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 
-/* ── 静的サーバ（ビルド済み out/ を配信） ───────────── */
+/* ── 静的サーバ（ビルド済み out/ を配信） ───────── */
 
 const ROOT = path.resolve(__dirname, '../../out')
 const MIME: Record<string, string> = {
@@ -43,7 +43,7 @@ test.afterAll(async () => {
   await new Promise((r) => server.close(r))
 })
 
-/* ── モックとヘルパー ─────────────────────────── */
+/* ── モックとヘルパー ─────────────────────── */
 
 /** 本番と同じ「オーバーレイ到着 → グラフ再構築」を必ず起こす */
 async function mockSupabase(page: Page, opts: { landing?: boolean } = {}) {
@@ -106,7 +106,7 @@ function collectErrors(page: Page): string[] {
   return errs
 }
 
-/* ── テスト本体 ───────────────────────────────── */
+/* ── テスト本体 ───────────────────────────── */
 
 test('初期表示後、物理が有限時間で完全に沈静化する（震え禁止）', async ({ page }) => {
   const errs = collectErrors(page)
@@ -127,7 +127,7 @@ test('回帰: オーバーレイでグラフが再構築された後もドラッ
   await page.waitForTimeout(2500)
   expect(await waitForStill(page)).toBe(true)
 
-  // ノードのある座標を掴む（概念ノードは大きいので当てやすい）
+  // ノードのある座標を掘む（概念ノードは大きいので当てやすい）
   await page.mouse.move(620, 440)
   await page.mouse.down()
   await page.mouse.move(626, 446) // 閾値を超えてドラッグ開始
@@ -148,7 +148,7 @@ test('回帰: オーバーレイでグラフが再構築された後もドラッ
   expect(errs).toEqual([])
 })
 
-test('絞り込みパネルの開閉でキャンバスが追従し、地図が壊れない', async ({ page }) => {
+test('絞り込みパネルはオーバーレイで開き、背面タップで閉じ、検索の解除は地図の上で1タップ', async ({ page }) => {
   const errs = collectErrors(page)
   await mockSupabase(page)
   await page.goto(baseURL, { waitUntil: 'domcontentloaded' })
@@ -156,22 +156,44 @@ test('絞り込みパネルの開閉でキャンバスが追従し、地図が�
 
   const h0 = await page.evaluate(() => document.querySelector('canvas')!.clientHeight)
   await page.getByRole('button', { name: /絞り込み/ }).click()
-  await page.waitForTimeout(700) // 開閉アニメーション + ResizeObserver
+  await page.waitForTimeout(500)
+  const search = page.getByPlaceholder(/タイトル・著者・概念で検索/)
+  await expect(search).toBeVisible()
+
+  // オーバーレイなので地図はリサイズされない（開閉のたびに地図が動かない）
   const h1 = await page.evaluate(() => document.querySelector('canvas')!.clientHeight)
-  expect(h1).toBeLessThan(h0) // パネルの分だけ縮む = 引き伸ばされていない
+  expect(h1).toBe(h0)
 
-  // 内部解像度が表示サイズに追従している（崩れの正体はこのズレだった）
-  const sync = await page.evaluate(() => {
-    const cv = document.querySelector('canvas')!
-    const dpr = Math.min(window.devicePixelRatio || 1, 2)
-    return Math.abs(cv.width - cv.clientWidth * dpr) <= 2 && Math.abs(cv.height - cv.clientHeight * dpr) <= 2
-  })
-  expect(sync).toBe(true)
+  // 検索してから背面（地図側）をタップ → パネルが閉じる
+  await search.fill('夜と霧')
+  await page.mouse.click(640, 640)
+  await page.waitForTimeout(500)
+  await expect(search).toBeHidden()
 
-  await page.getByRole('button', { name: /絞り込み/ }).click()
-  await page.waitForTimeout(700)
-  const h2 = await page.evaluate(() => document.querySelector('canvas')!.clientHeight)
-  expect(h2).toBe(h0) // 閉じれば元どおり
+  // 検索中は地図の上に解除チップが出て、1タップで解除できる
+  const chip = page.getByRole('button', { name: /検索「夜と霧」/ })
+  await expect(chip).toBeVisible()
+  await chip.click()
+  await expect(chip).toBeHidden()
+  expect(errs).toEqual([])
+})
+
+test('凡例は右下の開閉式チップで、左下のAI提案と重ならない', async ({ page }) => {
+  const errs = collectErrors(page)
+  await mockSupabase(page)
+  await page.goto(baseURL, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(1500)
+
+  const chip = page.getByRole('button', { name: /凡例/ })
+  await expect(chip).toBeVisible()
+  const chipBox = (await chip.boundingBox())!
+  const dockBox = (await page.getByRole('button', { name: /AIの提案/ }).boundingBox())!
+  expect(chipBox.x).toBeGreaterThan(dockBox.x + dockBox.width) // 右下 vs 左下
+
+  await chip.click()
+  await expect(page.getByText('概念（いちばん大きい）')).toBeVisible()
+  await page.getByRole('button', { name: '×', exact: true }).click()
+  await expect(page.getByText('概念（いちばん大きい）')).toBeHidden()
   expect(errs).toEqual([])
 })
 
