@@ -245,6 +245,31 @@ export function normalizeTitleKey(raw: string): string {
 /** 本と本の結びつきの正規化（無向: 辞書順で a < b） */
 export const bondPair = (x: string, y: string): [string, string] => (x < y ? [x, y] : [y, x])
 
+/* ── カテゴリ → 概念の自動紐付け ────────────────────
+   「1冊ずつ紐づけるのは手間」への回答。本の領域(cat)から対応する
+   cat:* 概念へ一旦自動で紐づけ、そこから個別にカスタマイズしてもらう。
+   - 既に自分の紐付けがある本には触らない（手動の判断を上書きしない）
+   - 強度は星をそのまま引き継ぐ（未評価の星0は控えめに3）
+   - 実在する概念にだけ張る（FK違反やゴミ紐付けを作らない） */
+
+export interface AutoTieRow { concept_key: string; book_key: string; strength: number }
+
+export function planAutoTies(
+  shelf: Iterable<[string, number]>,
+  tiedBookKeys: Set<string>,
+  catOf: (key: string) => string | undefined,
+  conceptKeys: Set<string>,
+): AutoTieRow[] {
+  const rows: AutoTieRow[] = []
+  for (const [key, star] of shelf) {
+    if (tiedBookKeys.has(key)) continue
+    const concept = `cat:${catOf(key) ?? 'lit'}`
+    if (!conceptKeys.has(concept)) continue
+    rows.push({ concept_key: concept, book_key: key, strength: star >= 1 && star <= 5 ? star : 3 })
+  }
+  return rows
+}
+
 
 /* ── ブクログ連携（IDだけで本棚を再現する） ──────────────
    非公式の公開JSON APIを同一オリジンの Worker (/api/booklog) 経由で読む。
