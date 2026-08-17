@@ -555,6 +555,7 @@ export function attachFollowIslands(base: Graph, input: SocialInput): Graph {
 
     const shelf = input.shelves.get(person.id) ?? new Map<string, number>()
     let bi = 0
+    let overlapCount = 0
     for (const [bookKey, star] of shelf) {
       const meta = input.titles.get(bookKey)
       const golden = bi * 2.39996
@@ -566,16 +567,26 @@ export function attachFollowIslands(base: Graph, input: SocialInput): Graph {
         x: cx + Math.cos(golden) * r, y: cy + Math.sin(golden) * r, tier: 'shelf',
       })
       edges.push({ from: acct.i, to: book.i, type: 'member', why: `${person.username} の本棚`, weight: 1 })
-      // 重なり: 自分も読んでいる本にだけ橋を架ける（読んでいない焼き込みノードには架けない）
+      // 重なり = 自分も読んでいる本。冊数だけ数える
       const mine = byKey.get(bookKey)
-      if (mine !== undefined && !nodes[mine].dynamic && nodes[mine].shelf) {
-        edges.push({ from: mine, to: book.i, type: 'overlap', why: '同じ本を読んでいる', weight: 1 })
-      }
+      if (mine !== undefined && !nodes[mine].dynamic && nodes[mine].shelf) overlapCount++
       bi++
+    }
+    // 重なりは1冊ごとに橋を架けない。本棚が似ている人ほど何百本もの橋が
+    // 画面を覆う「カーテン」になるため、アカウント同士の1本に集約する。
+    // 内訳（どの本が重なっているか）はアカウントメニューのフォロー候補に出る。
+    if (overlapCount > 0) {
+      edges.push({
+        from: me.i, to: acct.i, type: 'overlap',
+        why: `${overlapCount}冊重なっている`, weight: 1, supporters: overlapCount,
+      })
     }
   })
 
+  // フォロー線は「自分が絡むもの」だけ描く。フォロー先同士の相互フォローまで
+  // 描くと島と島が線で結ばれて読めなくなる（関係の把握は各島の詳細で足りる）
   for (const f of input.follows) {
+    if (f.follower !== input.me.id && f.followee !== input.me.id) continue
     const a = acctIndex.get(f.follower)
     const b = acctIndex.get(f.followee)
     if (a === undefined || b === undefined) continue
