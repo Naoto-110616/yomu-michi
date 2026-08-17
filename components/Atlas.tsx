@@ -584,12 +584,20 @@ export default function Atlas({ payload }: { payload: Payload }) {
     if (didFit.current) return
     const t = setTimeout(() => {
       if (!sim.activeList.length || size.current.w === 0) return
-      transform.current = fitTransform(snapshot(), sim.activeList, { panelSide: 'none', panelSize: 0 })
+      // 初期カメラは「自分の地図」に合わせる。フォローの島まで含めて
+      // フィットすると自分の図が豆粒になるので、島は視界の外に置いておく
+      const own = sim.activeList.filter((i) => {
+        const n = graph.nodes[i]
+        if (n.key.includes('::')) return false // 島の本
+        if (n.kind === 'account' && user && n.key !== `acct:${user.id}`) return false // 島のアカウント
+        return true
+      })
+      transform.current = fitTransform(snapshot(), own.length ? own : sim.activeList, { panelSide: 'none', panelSize: 0 })
       didFit.current = true
       paintOnce()
     }, 60)
     return () => clearTimeout(t)
-  }, [sim, snapshot, paintOnce])
+  }, [sim, graph, user, snapshot, paintOnce])
 
   /* ── ★を付ける（ログイン中のみ） ─────────── */
   const rate = useCallback(async (key: string, star: number | null) => {
@@ -861,7 +869,7 @@ export default function Atlas({ payload }: { payload: Payload }) {
     reloadOverlay()
   }, [user, reloadOverlay])
 
-  /* ── 詳細パネル用 ───────────────────────── */
+  /* ── 詳細パネル用 ───────────────────── */
   const relations = useMemo(() => {
     if (selected === null) return null
     const incoming: { node: number; type: RelationType; why: string; weight: number }[] = []
