@@ -12,6 +12,7 @@ const input = {
     { follower: 'u1', followee: 'u2' },
     { follower: 'u1', followee: 'u3' },
     { follower: 'u3', followee: 'u1' },
+    { follower: 'u2', followee: 'u3' }, // フォロー先同士 — 描かない
   ],
   shelves: new Map([
     ['u2', new Map([['book_a', 3], ['isbn:9999', 5]])],
@@ -38,17 +39,24 @@ describe('attachFollowIslands: 自分の図の周縁にフォローの島', () =
     expect(g.nodes.find((n) => n.key === 'book_a')).toBeDefined() // 自分側はそのまま
   })
 
-  it('同じ本を読んでいると島と島の橋（overlap）が架かる', () => {
+  it('本棚の重なりは1冊ごとの橋ではなく、アカウント同士の1本に集約される', () => {
+    // 本棚が似ている人ほど橋が何百本も重なって「カーテン」になるため
     const g = attachFollowIslands(buildGraph(tinyPayload()), input)
     const bridges = g.edges.filter((e) => e.type === 'overlap')
-    expect(bridges).toHaveLength(1) // book_a のみ（isbn:9999 は自分の図に無い）
-    expect(g.nodes[bridges[0].from].key).toBe('book_a')
-    expect(g.nodes[bridges[0].to].key).toBe('u2::book_a')
+    expect(bridges).toHaveLength(1) // u2 と1冊（book_a）重なっている
+    expect(g.nodes[bridges[0].from].key).toBe('acct:u1')
+    expect(g.nodes[bridges[0].to].key).toBe('acct:u2')
+    expect(bridges[0].supporters).toBe(1) // 重なり冊数
+    expect(bridges[0].why).toContain('1冊')
   })
 
-  it('フォロー線と隣接リストが破綻していない', () => {
+  it('フォロー線は自分が絡むものだけ（フォロー先同士は描かない）', () => {
     const g = attachFollowIslands(buildGraph(tinyPayload()), input)
-    expect(g.edges.filter((e) => e.type === 'follow')).toHaveLength(3)
+    const follows = g.edges.filter((e) => e.type === 'follow')
+    expect(follows).toHaveLength(3) // u1→u2, u1→u3, u3→u1（u2→u3 は落ちる）
+    for (const e of follows) {
+      expect([g.nodes[e.from].key, g.nodes[e.to].key]).toContain('acct:u1')
+    }
     for (const adj of g.adjacency) for (const ei of adj) expect(g.edges[ei]).toBeDefined()
   })
 })
